@@ -6,7 +6,7 @@ import time
 
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -46,6 +46,8 @@ from use_cases import (
 )
 
 import auth
+
+import ratelimit
 
 
 # ============================================================
@@ -310,13 +312,60 @@ def me(
 
 
 # ============================================================
+# QUESTION LIMIT (anonymous visitors; see ratelimit.py)
+# ============================================================
+
+def enforce_question_limit(
+    http_request,
+    authorization
+):
+    """
+    Raise 429 if an anonymous visitor is over the question limit.
+    Signed-in team members are never limited.
+    """
+
+    if auth.session_user(authorization):
+        return
+
+    ip = ratelimit.client_ip(http_request)
+
+    blocked = ratelimit.check(ip)
+
+    if blocked:
+
+        print(
+            "RATE LIMITED:",
+            ip
+        )
+
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "stage": "rate_limit",
+                "error": blocked["error"],
+                "retry_after": blocked["retry_after"]
+            },
+            headers={
+                "Retry-After": str(blocked["retry_after"])
+            }
+        )
+
+
+# ============================================================
 # INTENT ENGINE
 # ============================================================
 
 @app.post("/intent")
 def understand_intent(
-    request: IntentRequest
+    request: IntentRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(default=None)
 ):
+
+    enforce_question_limit(
+        http_request,
+        authorization
+    )
 
     print(
         "\nSTEP 1: Understanding intent..."
@@ -834,11 +883,18 @@ def use_cases():
 
 @app.post("/plan")
 def plan(
-    request: IntentRequest
+    request: IntentRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(default=None)
 ):
     """
     Show the AnalysisSpec for a query without collecting data.
     """
+
+    enforce_question_limit(
+        http_request,
+        authorization
+    )
 
     intent, spec, use_case = plan_analysis(
         request.query
@@ -955,8 +1011,15 @@ def run_query(query, radius_km=None, emit=None):
 
 @app.post("/analyze")
 def analyze(
-    request: IntentRequest
+    request: IntentRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(default=None)
 ):
+
+    enforce_question_limit(
+        http_request,
+        authorization
+    )
 
     return run_query(
         request.query,
@@ -966,7 +1029,9 @@ def analyze(
 
 @app.post("/analyze/stream")
 def analyze_stream(
-    request: IntentRequest
+    request: IntentRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(default=None)
 ):
     """
     Same as /analyze, streamed as server-sent events:
@@ -979,6 +1044,12 @@ def analyze_stream(
         event: result  <the /analyze response>
         event: error   {"status_code": ..., "detail": {...}}
     """
+
+    # Checked before streaming starts, so a limited visitor gets a 429.
+    enforce_question_limit(
+        http_request,
+        authorization
+    )
 
     events = queue.Queue()
 

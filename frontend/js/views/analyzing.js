@@ -12,6 +12,7 @@
 
   // Backend error stage -> step it happened in.
   const STAGE_STEP = {
+    rate_limit: "intent",
     deepseek: "intent", deepseek_json: "intent", location_extraction: "intent",
     geocoding: "location",
     building_data: "candidates", candidate_data: "candidates",
@@ -20,6 +21,8 @@
 
   function errorMessage(error) {
     switch (error.stage) {
+      case "rate_limit":
+        return error.text || "You have reached the free question limit. Sign in for unlimited questions, or try again later.";
       case "deepseek":
         return "SkyLens could not reach its planning model (DeepSeek). Check the API key and try again.";
       case "deepseek_json":

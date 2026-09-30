@@ -36,7 +36,8 @@
     try {
       response = await fetch(SL.API + "/analyze/stream", {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
+        // Signed-in team members are exempt from the server's question limit.
+        headers: Object.assign({"Content-Type": "application/json"}, SL.auth.header()),
         body: JSON.stringify({query, radius_km: radiusKm || null}),
         signal: controller.signal,
       });
