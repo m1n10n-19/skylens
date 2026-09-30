@@ -11,10 +11,14 @@ def get_buildings(
     latitude: float,
     longitude: float,
     radius_km: float = 1,
-    minimum_area_m2: float = 500
+    minimum_area_m2: float = 500,
+    include_geometry: bool = False
 ):
     """
     OSM building footprints around a location, largest first.
+
+    include_geometry adds an internal "_polygon" (lon/lat shapely
+    polygon) used by the analysis pipeline to draw footprints.
     """
 
     # MVP safety limit
@@ -84,7 +88,7 @@ def get_buildings(
 
         tags = element.get("tags", {})
 
-        candidates.append({
+        candidate = {
             "osm_id": element["id"],
             "osm_type": element["type"],
             "latitude": round(centroid.y, 6),
@@ -92,7 +96,12 @@ def get_buildings(
             "area_m2": round(area_m2, 1),
             "building_type": tags.get("building", "unknown"),
             "name": tags.get("name"),
-        })
+        }
+
+        if include_geometry:
+            candidate["_polygon"] = polygon
+
+        candidates.append(candidate)
 
     candidates.sort(
         key=lambda x: x["area_m2"],

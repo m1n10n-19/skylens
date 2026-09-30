@@ -7,7 +7,8 @@ SkyLens actually has, and returns:
     {
         "score": 0-100,
         "evidence": "what was measured",
-        "reasons": ["short human-readable reason", ...]
+        "reasons": ["short human-readable reason", ...],
+        "measurements": {"plain_value": 123, ...}   # optional
     }
 
 or None when the evidence cannot be measured for this candidate.
@@ -39,6 +40,16 @@ def _m(distance):
 def _area(area_m2):
 
     return f"{round(area_m2):,} m²"
+
+
+def _road_label(road):
+    """
+    "OMR (primary)" for named roads, "residential road" otherwise.
+    """
+
+    kind = road.highway.replace("_", " ")
+
+    return f"{road.name} ({kind})" if road.name else f"{kind} road"
 
 
 # ============================================================
@@ -263,6 +274,7 @@ def road_access(candidate, context, spec):
             "score": 5,
             "evidence": "No mapped vehicle road within 500 m",
             "reasons": ["No mapped road access nearby"],
+            "measurements": {"nearest_road_m": None},
         }
 
     if distance <= 15:
@@ -283,7 +295,7 @@ def road_access(candidate, context, spec):
 
     label = road.name or road.highway.replace("_", " ") + " road"
 
-    evidence = f"Nearest road: {label} ({road.highway}), {_m(distance)}"
+    evidence = f"Nearest road: {_road_label(road)}, {_m(distance)}"
 
     if distance <= 15:
         reasons = [f"Direct frontage on {label}"]
@@ -292,7 +304,16 @@ def road_access(candidate, context, spec):
     else:
         reasons = [f"Weak road access: nearest road {_m(distance)} away"]
 
-    return {"score": score, "evidence": evidence, "reasons": reasons}
+    return {
+        "score": score,
+        "evidence": evidence,
+        "reasons": reasons,
+        "measurements": {
+            "nearest_road_m": round(distance),
+            "nearest_road": label,
+            "nearest_road_type": road.highway,
+        },
+    }
 
 
 def major_road_proximity(candidate, context, spec):
@@ -308,6 +329,7 @@ def major_road_proximity(candidate, context, spec):
             "score": 5,
             "evidence": "No primary/secondary/trunk road within 1 km",
             "reasons": [],
+            "measurements": {"nearest_major_road_m": None},
         }
 
     if distance <= 50:
@@ -330,8 +352,12 @@ def major_road_proximity(candidate, context, spec):
 
     return {
         "score": score,
-        "evidence": f"Nearest major road: {label} ({road.highway}), {_m(distance)}",
+        "evidence": f"Nearest major road: {_road_label(road)}, {_m(distance)}",
         "reasons": reasons,
+        "measurements": {
+            "nearest_major_road_m": round(distance),
+            "nearest_major_road": label,
+        },
     }
 
 
@@ -371,6 +397,7 @@ def demand_potential(candidate, context, spec):
             f"hospitals etc. within 500 m (OSM proxy)"
         ),
         "reasons": reasons,
+        "measurements": {"dwell_destinations_500m": n},
     }
 
 
@@ -396,6 +423,7 @@ def commercial_activity(candidate, context, spec):
         "score": score,
         "evidence": f"{n} mapped shops, offices and amenities within 500 m",
         "reasons": reasons,
+        "measurements": {"businesses_500m": n},
     }
 
 
@@ -428,6 +456,11 @@ def ev_competition(candidate, context, spec):
                 "(OSM coverage of chargers may be incomplete)"
             ),
             "reasons": ["No mapped competing chargers within 2 km"],
+            "measurements": {
+                "chargers_2km": 0,
+                "chargers_1km": 0,
+                "nearest_charger_m": None,
+            },
         }
 
     nearest = min(shape.distance(poi.point) for poi in within_2km)
@@ -442,6 +475,11 @@ def ev_competition(candidate, context, spec):
             [f"{near} existing charger(s) within 1 km"]
             if near else []
         ),
+        "measurements": {
+            "chargers_2km": len(within_2km),
+            "chargers_1km": near,
+            "nearest_charger_m": round(nearest),
+        },
     }
 
 
@@ -525,6 +563,7 @@ def business_competition(candidate, context, spec):
             ["Few similar businesses nearby"]
             if n <= 1 else []
         ),
+        "measurements": {"competitors_500m": n},
     }
 
 
@@ -566,6 +605,7 @@ def parking_potential(candidate, context, spec):
             f"site {_area(area)}"
         ),
         "reasons": reasons,
+        "measurements": {"parking_areas_300m": n},
     }
 
 
@@ -598,6 +638,7 @@ def vacancy_evidence(candidate, context, spec):
         "score": score,
         "evidence": f"OSM land-use tag: {landuse} (not verified on imagery)",
         "reasons": [reason],
+        "measurements": {"landuse_tag": landuse},
     }
 
 
@@ -620,6 +661,7 @@ def location_proximity(candidate, context, spec):
             [f"Within {_m(distance)} of {place}"]
             if distance <= radius_m / 3 else []
         ),
+        "measurements": {"distance_to_centre_m": round(distance)},
     }
 
 

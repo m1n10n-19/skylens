@@ -1,10 +1,15 @@
 import json
 import os
+import queue
+import threading
 
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -213,6 +218,9 @@ geolocator = Nominatim(
 class IntentRequest(BaseModel):
 
     query: str
+
+    # Optional override of the search radius (km, max 2).
+    radius_km: Optional[float] = None
 
 
 # ============================================================
@@ -781,10 +789,13 @@ def plan(
 # COMPLETE SKY LENS ANALYSIS
 # ============================================================
 
-@app.post("/analyze")
-def analyze(
-    request: IntentRequest
-):
+def run_query(query, radius_km=None, emit=None):
+    """
+    Plan the query with DeepSeek, then run the matching use case.
+    emit(event, data) receives progress events (streaming only).
+    """
+
+    emit = emit or (lambda event, data: None)
 
     print(
         "\n"
@@ -797,7 +808,7 @@ def analyze(
 
     print(
         "QUERY:",
-        request.query
+        query
     )
 
     print(
@@ -805,13 +816,29 @@ def analyze(
     )
 
     intent, spec, use_case = plan_analysis(
-        request.query
+        query
     )
+
+    # Explicit radius from the client ("find similar sites nearby")
+    # overrides anything DeepSeek read from the text.
+    if radius_km:
+        spec.radius_km = radius_km
+
+    emit("step", {
+        "step": "intent",
+        "status": "done",
+        "intent_type": spec.intent_type,
+        "use_case": use_case.id if use_case else None,
+        "title": use_case.title if use_case else None,
+        "implemented": bool(use_case and use_case.implemented),
+        "location": spec.location,
+        "criteria": len(use_case.criteria) if use_case else 0,
+    })
 
     if use_case is None:
 
         result = unsupported_response(
-            request.query,
+            query,
             intent,
             spec
         )
@@ -819,7 +846,7 @@ def analyze(
     elif not use_case.implemented:
 
         result = not_implemented_response(
-            request.query,
+            query,
             intent,
             spec,
             use_case
@@ -828,11 +855,12 @@ def analyze(
     else:
 
         result = run_analysis(
-            request.query,
+            query,
             intent,
             spec,
             use_case,
-            geolocator
+            geolocator,
+            emit
         )
 
     print(
@@ -850,3 +878,97 @@ def analyze(
     )
 
     return result
+
+
+@app.post("/analyze")
+def analyze(
+    request: IntentRequest
+):
+
+    return run_query(
+        request.query,
+        request.radius_km
+    )
+
+
+@app.post("/analyze/stream")
+def analyze_stream(
+    request: IntentRequest
+):
+    """
+    Same as /analyze, streamed as server-sent events:
+
+        event: step    {"step": "intent" | "location" | "evidence" |
+                        "candidates" | "scoring" | "decision",
+                        "status": "running" | "done", ...}
+        event: layer   {"id": "<data layer>", "status": "used" | "failed"}
+        event: candidates  {"count": n, "preview": [...]}
+        event: result  <the /analyze response>
+        event: error   {"status_code": ..., "detail": {...}}
+    """
+
+    events = queue.Queue()
+
+    def emit(event, data):
+        events.put((event, data))
+
+    def worker():
+
+        try:
+
+            emit("result", run_query(
+                request.query,
+                request.radius_km,
+                emit
+            ))
+
+        except HTTPException as e:
+
+            emit("error", {
+                "status_code": e.status_code,
+                "detail": e.detail
+            })
+
+        except Exception as e:
+
+            print("ANALYSIS FAILED:", repr(e))
+
+            emit("error", {
+                "status_code": 500,
+                "detail": {
+                    "stage": "unknown",
+                    "error_type": type(e).__name__,
+                    "error": str(e)
+                }
+            })
+
+        finally:
+
+            events.put(None)
+
+    threading.Thread(
+        target=worker,
+        daemon=True
+    ).start()
+
+    def stream():
+
+        while True:
+
+            item = events.get()
+
+            if item is None:
+                return
+
+            event, data = item
+
+            yield (
+                f"event: {event}\n"
+                f"data: {json.dumps(data, default=str)}\n\n"
+            )
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"}
+    )

@@ -1,0 +1,144 @@
+// App shell: header, hash router and the analysis run controller.
+(function (SL) {
+
+  // ---------------------------------------------------------- header
+
+  SL.renderHeader = () => {
+    const left = SL.store.remaining();
+    SL.$("#topbar").innerHTML = `
+      <a class="brand" href="#/" aria-label="SkyLens home">
+        <span class="wordmark">SKY<span>LENS</span></span>
+        <span class="tagline">Reality Intelligence</span>
+      </a>
+      <nav class="top-actions">
+        <a class="pill${left ? "" : " pill-out"}" href="#/upgrade"
+           title="Demo counter, stored in this browser">Free intents: ${left} / ${SL.FREE_INTENTS}</a>
+        <a class="btn-ghost" href="#/projects">Projects</a>
+        <span class="avatar" title="Accounts are not connected in this demo">${SL.icon("user", 16)}</span>
+      </nav>`;
+  };
+
+  // ---------------------------------------------------------- results
+
+  SL.getResult = id =>
+    SL.store.result(id) || (SL.run && SL.run.resultId === id ? SL.run.result : null);
+
+  SL.missingResult = el => {
+    el.innerHTML = `
+      <section class="page narrow empty-page">
+        <h1>This analysis isn't available</h1>
+        <p class="lead">Only your last few analyses are kept, and only in this browser.</p>
+        <a class="btn-lime" href="#/">Ask a question ${SL.icon("arrowRight", 16)}</a>
+      </section>`;
+  };
+
+  // ---------------------------------------------------------- router
+
+  const ROUTES = [
+    [/^#\/analyzing$/, "analyzing"],
+    [/^#\/results\/(\w+)$/, "results"],
+    [/^#\/site\/(\w+)\/(\d+)$/, "site"],
+    [/^#\/next\/(\w+)$/, "next"],
+    [/^#\/compare\/(\w+)$/, "compare"],
+    [/^#\/report\/(\w+)$/, "report"],
+    [/^#\/upgrade$/, "upgrade"],
+    [/^#\/projects$/, "projects"],
+  ];
+
+  let current = null;
+
+  function route() {
+    const hash = location.hash;
+    let name = "workspace";
+    let params = [];
+    for (const [pattern, view] of ROUTES) {
+      const match = hash.match(pattern);
+      if (match) { name = view; params = match.slice(1); break; }
+    }
+    if (current && current.destroy) current.destroy();
+    current = SL.views[name];
+    const el = SL.$("#view");
+    el.innerHTML = "";
+    el.className = "view view-" + name;
+    document.body.dataset.view = name;
+    SL.renderHeader();
+    window.scrollTo(0, 0);
+    current.render(el, ...params);
+  }
+
+  SL.go = hash => {
+    if (location.hash === hash) route();
+    else location.hash = hash;
+  };
+
+  window.addEventListener("hashchange", route);
+  document.addEventListener("DOMContentLoaded", route);
+
+  // ---------------------------------------------------------- analysis run
+
+  // One analysis at a time. Views subscribe via run.listeners.
+  SL.run = null;
+
+  SL.startAnalysis = (query, radiusKm) => {
+
+    query = (query || "").trim();
+
+    if (!query) return;
+
+    if (SL.run && SL.run.active) {
+      SL.toast("An analysis is already running.");
+      SL.go("#/analyzing");
+      return;
+    }
+
+    if (SL.store.remaining() <= 0) {
+      SL.go("#/upgrade");
+      return;
+    }
+
+    const run = SL.run = {
+      query, radiusKm, active: true,
+      steps: {}, layers: {}, preview: null,
+      error: null, result: null, resultId: null,
+      listeners: new Set(),
+    };
+
+    const notify = () => run.listeners.forEach(fn => fn(run));
+
+    SL.go("#/analyzing");
+
+    SL.analyzeStream(query, radiusKm, (event, data) => {
+      if (event === "step") {
+        run.steps[data.step] = Object.assign({}, run.steps[data.step], data);
+        if (data.step === "evidence") {
+          data.layers.forEach(l => {
+            if (!run.layers[l.id]) run.layers[l.id] = l.available ? "pending" : "unavailable";
+          });
+        }
+      } else if (event === "layer") {
+        run.layers[data.id] = data.status;
+      } else if (event === "candidates") {
+        run.preview = data;
+      }
+      notify();
+    }).then(result => {
+      run.result = result;
+      run.active = false;
+      run.resultId = SL.store.add(result);
+      SL.renderHeader();
+      notify();
+      if (location.hash === "#/analyzing") {
+        setTimeout(() => {
+          if (location.hash === "#/analyzing") location.hash = "#/results/" + run.resultId;
+        }, 700);
+      } else {
+        SL.toast("Your analysis is ready. Open it from Projects.");
+      }
+    }).catch(error => {
+      run.error = error;
+      run.active = false;
+      notify();
+    });
+  };
+
+})(window.SL);

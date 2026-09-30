@@ -14,7 +14,8 @@ import math
 
 from dataclasses import dataclass, field
 
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, Point, Polygon, mapping
+from shapely.ops import transform
 
 from overpass import query_overpass as _query_overpass
 
@@ -627,3 +628,124 @@ def is_commercial_poi(poi):
         or poi.value("amenity") in COMMERCIAL_AMENITIES
         or poi.value("tourism") in DWELL_TOURISM
     )
+
+
+# ============================================================
+# OUTPUT FOR MAPS
+# ============================================================
+
+def _rounded(value):
+
+    if isinstance(value, (list, tuple)):
+        return [_rounded(v) for v in value]
+
+    if isinstance(value, float):
+        return round(value, 6)
+
+    return value
+
+
+def to_geojson(shape, proj=None):
+    """
+    GeoJSON geometry (lon/lat) for a shape. Pass proj for shapes in
+    the local metric plane; lon/lat shapes are used as they are.
+    Geometry is simplified to ~0.5 m.
+    """
+
+    if proj is not None:
+        shape = transform(proj.to_lonlat, shape.simplify(0.5))
+    else:
+        shape = shape.simplify(0.000005)
+
+    geojson = mapping(shape)
+
+    return {
+        "type": geojson["type"],
+        "coordinates": _rounded(geojson["coordinates"]),
+    }
+
+
+def candidate_geojson(candidate, context):
+
+    if candidate.get("_shape") is not None:
+        return to_geojson(candidate["_shape"], context.proj)
+
+    if candidate.get("_polygon") is not None:
+        return to_geojson(candidate["_polygon"])
+
+    return None
+
+
+def _poi_category(poi):
+
+    for key in ("amenity", "shop", "tourism"):
+        if poi.value(key):
+            return poi.value(key)
+
+    return "office" if poi.value("office") else "place"
+
+
+def _point_json(context, poi, shape=None):
+
+    lon, lat = context.proj.to_lonlat(poi.point.x, poi.point.y)
+
+    item = {
+        "lat": round(lat, 6),
+        "lon": round(lon, 6),
+        "name": poi.value("name"),
+        "category": _poi_category(poi),
+    }
+
+    if shape is not None:
+        item["distance_m"] = round(shape.distance(poi.point))
+
+    return item
+
+
+def nearby_features(context, candidate, max_pois=80):
+    """
+    Mapped features around one candidate, for the site view:
+    the nearest road, POIs, parking and EV chargers, within the
+    same distances the criteria use. None if no context was loaded.
+    """
+
+    if not context.roads and not (
+        context.pois or context.parking or context.chargers
+    ):
+        return None
+
+    shape = context.shape_of(candidate)
+
+    road = None
+
+    distance, nearest = nearest_road(context, shape, ROAD_RADIUS_M)
+
+    if nearest is not None:
+
+        # Only the part of the road near the site.
+        clipped = nearest.line.intersection(shape.buffer(ROAD_RADIUS_M + 100))
+
+        road = {
+            "name": nearest.name,
+            "type": nearest.highway,
+            "distance_m": round(distance),
+            "geometry": (
+                to_geojson(clipped, context.proj)
+                if not clipped.is_empty else None
+            ),
+        }
+
+    pois = count_within(context.pois, shape, POI_RADIUS_M)[:max_pois]
+
+    return {
+        "nearest_road": road,
+        "pois": [_point_json(context, p) for p in pois],
+        "parking": [
+            _point_json(context, p)
+            for p in count_within(context.parking, shape, PARKING_RADIUS_M)
+        ],
+        "chargers": [
+            _point_json(context, p, shape)
+            for p in count_within(context.chargers, shape, CHARGER_RADIUS_M)
+        ],
+    }

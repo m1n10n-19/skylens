@@ -112,6 +112,8 @@ def score_weighted_criteria(candidate, spec, use_case, context):
 
     missing = []
 
+    measurements = {}
+
     for criterion in use_case.criteria:
 
         result = None
@@ -154,6 +156,8 @@ def score_weighted_criteria(candidate, spec, use_case, context):
 
         reasons.extend(result.get("reasons") or [])
 
+        measurements.update(result.get("measurements") or {})
+
     if measured_weight > 0:
 
         overall = round(weighted_sum / measured_weight)
@@ -181,6 +185,7 @@ def score_weighted_criteria(candidate, spec, use_case, context):
         "criteria": results,
         "missing_data": missing + list(use_case.unassessed),
         "reasons": reasons,
+        "measurements": measurements,
     }
 
 

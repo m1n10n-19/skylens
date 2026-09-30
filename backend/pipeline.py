@@ -12,7 +12,9 @@ from buildings import get_buildings
 
 from geodata import (
     CONTEXT_LAYERS,
+    candidate_geojson,
     collect_candidates_and_context,
+    nearby_features,
     new_context,
 )
 
@@ -34,6 +36,13 @@ DEFAULT_RADIUS_KM = 1
 MAX_RADIUS_KM = 2
 
 TOP_N = 10
+
+# Candidates sent to the progress map while the analysis runs.
+PREVIEW_N = 60
+
+
+def _no_emit(event, data):
+    pass
 
 
 # ============================================================
@@ -243,6 +252,7 @@ def _candidates(use_case, latitude, longitude, radius_km, minimum, maximum,
                 longitude=longitude,
                 radius_km=radius_km,
                 minimum_area_m2=minimum,
+                include_geometry=True,
             )
 
             if maximum:
@@ -372,7 +382,16 @@ def _decision(use_case, scored, top):
 # RUN
 # ============================================================
 
-def run_analysis(query, intent, spec, use_case, geolocator):
+def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
+    """
+    Run the analysis. emit(event, data) is called as each step
+    finishes, for the streaming endpoint; see main.analyze_stream.
+    """
+
+    emit = emit or _no_emit
+
+    def step(step_id, status, **data):
+        emit("step", {"step": step_id, "status": status, **data})
 
     # --------------------------------------------------------
     # Location
@@ -399,11 +418,28 @@ def run_analysis(query, intent, spec, use_case, geolocator):
 
     print("\nSTEP 3: Search radius:", radius_km, "km")
 
+    step(
+        "location", "done",
+        name=location.address,
+        latitude=latitude,
+        longitude=longitude,
+        radius_km=radius_km,
+    )
+
+    step("evidence", "done", layers=describe_use_case(use_case)["data_layers"])
+
+    step("candidates", "running")
+
     # --------------------------------------------------------
     # Data collection
     # --------------------------------------------------------
 
     satellite, satellite_status = _satellite(latitude, longitude, radius_km)
+
+    emit("layer", {
+        "id": "satellite_imagery",
+        "status": "used" if satellite else "failed",
+    })
 
     minimum, maximum = area_filter(spec, use_case)
 
@@ -413,6 +449,32 @@ def run_analysis(query, intent, spec, use_case, geolocator):
 
     candidates, context = _candidates(
         use_case, latitude, longitude, radius_km, minimum, maximum, place
+    )
+
+    for layer in context.layer_status:
+        emit("layer", {"id": layer, "status": "used"})
+
+    emit("candidates", {
+        "count": len(candidates),
+        "preview": [
+            {
+                "latitude": c["latitude"],
+                "longitude": c["longitude"],
+                "geometry": candidate_geojson(c, context),
+            }
+            for c in candidates[:PREVIEW_N]
+        ],
+    })
+
+    step("candidates", "done", count=len(candidates))
+
+    step(
+        "scoring", "running",
+        criteria=len(use_case.criteria),
+        measured=sum(
+            1 for c in use_case.criteria
+            if c.evaluator and context.has_layer(c.data_layer)
+        ),
     )
 
     # --------------------------------------------------------
@@ -453,8 +515,23 @@ def run_analysis(query, intent, spec, use_case, geolocator):
 
     top = scored[:TOP_N]
 
+    originals = {
+        (c.get("osm_type"), c.get("osm_id")): c
+        for c in candidates
+    }
+
     for rank, candidate in enumerate(top, start=1):
+
+        original = originals[(candidate.get("osm_type"), candidate.get("osm_id"))]
+
         candidate["rank"] = rank
+
+        # Outline and surroundings for the maps.
+        candidate["geometry"] = candidate_geojson(original, context)
+
+        candidate["nearby"] = nearby_features(context, original)
+
+    step("scoring", "done", ranked=len(top))
 
     print("STEP 6 COMPLETE")
     print("Top prospects:", len(top))
@@ -494,6 +571,8 @@ def run_analysis(query, intent, spec, use_case, geolocator):
         )
 
     print("STEP 7 COMPLETE")
+
+    step("decision", "done")
 
     return {
 
