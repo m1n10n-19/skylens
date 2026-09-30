@@ -11,11 +11,24 @@
         <span class="tagline">Reality Intelligence</span>
       </a>
       <nav class="top-actions">
-        <a class="pill${left ? "" : " pill-out"}" href="#/upgrade"
-           title="Demo counter, stored in this browser">Free intents: ${left} / ${SL.FREE_INTENTS}</a>
+        ${SL.unlimited()
+          ? `<span class="pill" title="Signed in: no question limit">Unlimited · ${SL.esc(SL.session.username)}</span>`
+          : `<a class="pill${left ? "" : " pill-out"}" href="#/upgrade"
+               title="Demo counter, stored in this browser">Free intents: ${left} / ${SL.FREE_INTENTS}</a>`}
         <a class="btn-ghost" href="#/projects">Projects</a>
-        <span class="avatar" title="Accounts are not connected in this demo">${SL.icon("user", 16)}</span>
+        ${SL.unlimited()
+          ? `<button class="btn-ghost" id="logout">Log out</button>`
+          : `<a class="btn-ghost" href="#/login">${SL.icon("user", 14)} Log in</a>`}
       </nav>`;
+
+    const logout = SL.$("#logout");
+    if (logout) {
+      logout.onclick = () => {
+        SL.auth.clear();
+        SL.renderHeader();
+        SL.toast("Logged out.");
+      };
+    }
   };
 
   // ---------------------------------------------------------- results
@@ -43,6 +56,7 @@
     [/^#\/report\/(\w+)$/, "report"],
     [/^#\/upgrade$/, "upgrade"],
     [/^#\/projects$/, "projects"],
+    [/^#\/login$/, "login"],
   ];
 
   let current = null;
@@ -71,8 +85,20 @@
     else location.hash = hash;
   };
 
-  window.addEventListener("hashchange", route);
-  document.addEventListener("DOMContentLoaded", route);
+  // Check a stored login before the first screen: it is dropped if it
+  // expired or the password in .env changed.
+  async function start() {
+    if (SL.auth.restore()) {
+      try {
+        const response = await fetch(SL.API + "/auth/me", {headers: SL.auth.header()});
+        if (response.ok && !(await response.json()).unlimited) SL.auth.clear();
+      } catch (e) { /* backend unreachable: keep the session until it can be checked */ }
+    }
+    window.addEventListener("hashchange", route);
+    route();
+  }
+
+  document.addEventListener("DOMContentLoaded", start);
 
   // ---------------------------------------------------------- analysis run
 

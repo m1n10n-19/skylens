@@ -111,10 +111,6 @@ p { margin: 0 0 10px; }
   padding: 6px 14px; font-size: 13px; font-weight: 600; white-space: nowrap;
 }
 .pill-out { border-color: var(--amber); color: var(--amber); }
-.avatar {
-  width: 34px; height: 34px; border-radius: 50%; background: #fff; color: #111;
-  display: inline-flex; align-items: center; justify-content: center;
-}
 
 /* ------------------------------------------------------------ cards */
 
@@ -446,8 +442,8 @@ body[data-view="report"] { background: #eef0ec; }
   .wordmark { font-size: 17px; }
   .tagline { display: none; }
   .top-actions { gap: 8px; }
-  .pill { font-size: 11.5px; padding: 5px 10px; }
-  .avatar { display: none; }
+  .pill { font-size: 11.5px; padding: 5px 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .top-actions { min-width: 0; }
   .btn-ghost { padding: 6px 10px; font-size: 12px; }
   .workspace, .analyzing, .page { padding-left: 16px; padding-right: 16px; }
   .workspace { padding-top: 32px; }
@@ -463,3 +459,22 @@ body[data-view="report"] { background: #eef0ec; }
   .report { padding: 24px 18px; }
   .up-card { padding: 28px 16px; }
 }
+
+/* ------------------------------------------------------------ login */
+
+.login { display: flex; justify-content: center; padding: 60px 20px; }
+.login-card {
+  width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 32px;
+}
+.login-card h1 { margin: 0; font-size: 28px; }
+.login-card label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.login-card input {
+  background: var(--bg); border: 1px solid var(--line-2); border-radius: 10px;
+  padding: 11px 12px; font-size: 15px; color: var(--text);
+}
+.login-card input:focus { outline: none; border-color: var(--lime); }
+.login-card .btn-lime { width: 100%; }
+.login-card .btn-lime:disabled { opacity: .6; cursor: wait; }
+.login-card .back { align-self: center; margin: 0; }
+.login-error { color: var(--bad); font-size: 14px; margin: 0; }

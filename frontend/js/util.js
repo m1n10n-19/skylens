@@ -7,6 +7,12 @@ window.SL = window.SL || {};
 
   SL.FREE_INTENTS = 3;
 
+  // Signed-in team member ({token, username}) or null; see SL.auth.
+  // Signed-in users have no question limit.
+  SL.session = null;
+
+  SL.unlimited = () => !!SL.session;
+
   // Screens register here (js/views/*.js); app.js routes to them.
   SL.views = {};
 
@@ -177,7 +183,7 @@ window.SL = window.SL || {};
 
     used: () => load().used,
 
-    remaining: () => Math.max(0, SL.FREE_INTENTS - load().used),
+    remaining: () => SL.unlimited() ? Infinity : Math.max(0, SL.FREE_INTENTS - load().used),
 
     history: () => load().history,
 
@@ -188,7 +194,7 @@ window.SL = window.SL || {};
       const id = Date.now().toString(36);
       const an = result.analysis || {};
       // Only answered questions use up a free intent.
-      if (result.status === "success") memory.used += 1;
+      if (result.status === "success" && !SL.unlimited()) memory.used += 1;
       memory.history.unshift({
         id,
         at: new Date().toISOString(),
@@ -217,6 +223,35 @@ window.SL = window.SL || {};
       load();
       memory.used = 0;
       save();
+    },
+  };
+
+  // ---------------------------------------------------------- team login
+
+  const SESSION_KEY = "skylens.session";
+
+  SL.auth = {
+
+    restore() {
+      try {
+        const session = JSON.parse(localStorage.getItem(SESSION_KEY));
+        if (session && session.token) SL.session = session;
+      } catch (e) { /* no stored session */ }
+      return SL.session;
+    },
+
+    save(session) {
+      SL.session = session;
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) { /* session lasts this page only */ }
+    },
+
+    clear() {
+      SL.session = null;
+      try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* nothing stored */ }
+    },
+
+    header() {
+      return SL.session ? {Authorization: "Bearer " + SL.session.token} : {};
     },
   };
 

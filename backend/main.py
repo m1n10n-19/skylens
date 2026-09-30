@@ -2,10 +2,11 @@ import json
 import os
 import queue
 import threading
+import time
 
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -42,6 +43,8 @@ from use_cases import (
     USE_CASES,
     describe_use_case
 )
+
+import auth
 
 
 # ============================================================
@@ -233,6 +236,75 @@ def health():
     return {
         "status": "ok",
         "service": "SkyLens Reality Intelligence"
+    }
+
+
+# ============================================================
+# TEAM LOGIN (credentials in .env; see auth.py)
+# ============================================================
+
+class LoginRequest(BaseModel):
+
+    username: str
+
+    password: str
+
+
+@app.post("/auth/login")
+def login(
+    request: LoginRequest
+):
+
+    if not auth.login_enabled():
+
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "stage": "auth",
+                "error": (
+                    "Login is not set up on this server. Add "
+                    "SKYLENS_USERNAME and SKYLENS_PASSWORD to .env "
+                    "and restart the backend."
+                )
+            }
+        )
+
+    token = auth.login(
+        request.username,
+        request.password
+    )
+
+    if not token:
+
+        # Slow down password guessing.
+        time.sleep(1)
+
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "stage": "auth",
+                "error": "Wrong username or password."
+            }
+        )
+
+    return {
+        "token": token,
+        "username": request.username.strip(),
+        "unlimited": True
+    }
+
+
+@app.get("/auth/me")
+def me(
+    authorization: Optional[str] = Header(default=None)
+):
+
+    username = auth.session_user(authorization)
+
+    return {
+        "login_enabled": auth.login_enabled(),
+        "username": username,
+        "unlimited": username is not None
     }
 
 
@@ -972,3 +1044,4 @@ def analyze_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"}
     )
+

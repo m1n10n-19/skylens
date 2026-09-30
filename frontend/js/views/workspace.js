@@ -48,7 +48,7 @@
             <button class="go" type="submit" aria-label="Analyze">${SL.icon("arrowRight", 20)}</button>
           </form>
           ${left ? "" : `<p class="notice">You've used your ${SL.FREE_INTENTS} free intents.
-            <a href="#/upgrade">See plans</a></p>`}
+            <a href="#/upgrade">See plans</a> or <a href="#/login">log in</a>.</p>`}
 
           <div class="examples">
             <div class="muted sm">Try an example:</div>

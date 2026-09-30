@@ -16,7 +16,8 @@
         <section class="upgrade">
           <div class="up-card">
             <div class="up-check">${SL.icon("check", 28)}</div>
-            <h1>${left ? `You have ${left} free intent${left === 1 ? "" : "s"} left`
+            <h1>${SL.unlimited() ? "You're logged in: no question limit"
+              : left ? `You have ${left} free intent${left === 1 ? "" : "s"} left`
               : `You've explored ${used} decision${used === 1 ? "" : "s"}<br>with SkyLens.`}</h1>
             <p class="muted">Here's what you've discovered:</p>
             <div class="up-stats">
@@ -32,7 +33,8 @@
               <button class="btn-lime lg" id="buy">Start with ₹50,000/month ${SL.icon("arrowRight", 16)}</button>
               <button class="btn-outline lg" id="talk">Talk to our team</button>
             </div>
-            ${left ? `<p><a class="back" href="#/">${SL.icon("arrowLeft", 16)} Keep exploring for free</a></p>` : ""}
+            ${left ? `<p><a class="back" href="#/">${SL.icon("arrowLeft", 16)} Keep exploring${SL.unlimited() ? "" : " for free"}</a></p>` : ""}
+            ${SL.unlimited() ? "" : `<p class="sm">Team member? <a class="link" href="#/login">Log in</a> for unlimited questions.</p>`}
             <p class="fineprint">Demo: the free-intent counter is stored in this browser.
               <button class="link" id="reset">Reset demo</button></p>
           </div>
