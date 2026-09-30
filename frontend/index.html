@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkyLens Reality Intelligence</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#0f1419;--panel:#171e25;--panel2:#1d252d;--line:#2b353f;--text:#f1f4f7;--mute:#9ba7b3;--accent:#f2b84b;--ok:#5fcf8f;--warn:#f2b84b;--low:#8b98a5;--bad:#f0766b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;line-height:1.5}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1280px;margin:0 auto;padding:0 24px}
+.top{border-bottom:1px solid var(--line);background:rgba(15,20,25,.95);padding:18px 0}
+.top .wrap{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+.brand h1{margin:0;font-size:24px}.brand span{color:var(--mute);font-size:13px}
+.ask{flex:1;min-width:420px;display:flex;gap:10px}
+.ask textarea{flex:1;height:58px;resize:none;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;font-size:14px}
+.btn{border:0;border-radius:8px;padding:0 22px;background:#fff;color:#111;font-weight:bold;font-size:14px}
+.btn:hover{opacity:.9}.btn:disabled{opacity:.5;cursor:wait}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+section{margin-top:22px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+h2{margin:0 0 12px;font-size:17px}
+.muted{color:var(--mute)}.sm{font-size:13px}
+.intro{margin-top:22px}
+.intro q{display:block;font-size:26px;line-height:1.3;quotes:none;max-width:900px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:4px 12px;font-size:13px}
+.chip b{color:#fff}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.steps li{position:relative;padding-top:38px;text-align:center;color:var(--mute)}
+.steps li:before{content:"";position:absolute;top:14px;left:-50%;width:100%;height:2px;background:var(--line)}
+.steps li:first-child:before{display:none}
+.steps li.done:before,.steps li.active:before{background:var(--ok)}
+.dot{position:absolute;top:0;left:50%;margin-left:-15px;width:30px;height:30px;border-radius:50%;background:var(--panel2);border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:bold;z-index:1}
+.steps b{display:block;color:var(--text);font-size:14px}.steps small{font-size:12px}
+.done .dot{background:var(--ok);border-color:var(--ok);color:#0b1a11}
+.active .dot{border-color:var(--accent);color:var(--accent);animation:pulse 1.2s infinite}
+.fail .dot{background:var(--bad);border-color:var(--bad);color:#200}
+@keyframes pulse{50%{box-shadow:0 0 0 7px rgba(242,184,75,.15)}}
+.decision{border-color:#3d4a57;background:linear-gradient(180deg,#1b232b,#171e25);display:grid;grid-template-columns:1.4fr 1fr;gap:28px}
+.decision h2{font-size:32px;line-height:1.2;margin:0 0 6px}
+.badge{display:inline-block;border-radius:6px;padding:2px 10px;font-size:13px;font-weight:bold;border:1px solid currentColor}
+.high{color:var(--ok)}.medium{color:var(--warn)}.low{color:var(--low)}
+.action{border-left:3px solid var(--accent);padding-left:14px;margin-top:14px}
+.why{margin:8px 0 0;padding-left:18px}
+.work{display:grid;grid-template-columns:1.7fr 1fr;gap:16px}
+#map{height:660px;border-radius:12px;border:1px solid var(--line)}
+.list{max-height:660px;overflow-y:auto;padding-right:4px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px;cursor:pointer}
+.card:hover{border-color:#5b6874}.card.sel{border-color:var(--accent);background:var(--panel2)}
+.card .hd{display:flex;align-items:center;gap:10px}
+.rank{font-size:22px;font-weight:bold;min-width:40px}.card:first-child .rank{color:var(--accent)}
+.score{margin-left:auto;text-align:right;font-size:13px}.score b{font-size:22px}
+.bar{height:5px;background:var(--line);border-radius:3px;margin:8px 0}.bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:13px;margin:8px 0}
+.kv span{color:var(--mute)}
+.card ul,.pop ul{margin:4px 0 0;padding-left:18px;font-size:13px}
+.pin{width:30px;height:30px;border-radius:50%;background:#fff;color:#111;border:2px solid #111;display:flex;align-items:center;justify-content:center;font:bold 13px Arial;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.pin.top{width:40px;height:40px;margin:-5px;background:var(--accent);font-size:17px;border-width:3px}
+.pin.sel{outline:3px solid #fff}
+.ev{display:grid;grid-template-columns:1.2fr 1fr;gap:20px;align-items:start}
+.ev .img{background:var(--panel2);border-radius:8px;min-height:200px;display:flex;align-items:center;justify-content:center;overflow:hidden;text-align:center;padding:12px}
+.ev img{max-width:100%;max-height:360px;display:block}
+.lim{background:#231d16;border-color:#5a4726}
+.lim ul{margin:0;padding-left:20px}.lim li{margin:6px 0}
+.cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:22px 0 40px}
+.cta .btn{padding:14px 26px}
+.err{border-color:var(--bad)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:10px 18px;border-radius:8px;font-size:14px;z-index:9999}
+[hidden]{display:none!important}
+@media(max-width:980px){.work,.decision,.ev{grid-template-columns:1fr}.ask{min-width:100%}.steps{grid-template-columns:repeat(3,1fr)}.steps li:before{display:none}#map{height:460px}.list{max-height:none}}
+@media(prefers-reduced-motion:reduce){.active .dot{animation:none}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brand"><h1>SkyLens</h1><span>Reality Intelligence</span></div>
+  <div class="ask">
+    <textarea id="q" aria-label="Your question">Find large roofs around Adyar Chennai suitable for solar. I want commercial buildings with at least 500 square metres of usable roof area.</textarea>
+    <button class="btn" id="go">Analyze with SkyLens</button>
+  </div>
+</div></header>
+
+<main class="wrap" id="report" hidden>
+  <div class="box intro" id="intro" hidden></div>
+  <section class="box"><h2>How SkyLens analyzed this</h2><ol class="steps" id="steps"></ol></section>
+  <section class="box err" id="error" hidden></section>
+
+  <div id="result" hidden>
+    <section class="box decision" id="decision"></section>
+    <section class="work">
+      <div id="map" role="application" aria-label="Map of top prospects"></div>
+      <div><h2>Top prospects, best first</h2><div class="list" id="list"></div></div>
+    </section>
+    <section class="box" id="evidence"></section>
+    <section class="box lim" id="limits"></section>
+    <div class="cta">
+      <button class="btn" data-soon="Detailed reports are not available in this MVP yet.">Generate Detailed Prospect Report</button>
+      <button class="btn ghost" data-soon="Roof verification requests are not available in this MVP yet.">Request Roof Verification</button>
+      <span class="sm muted">Next step: confirm the top sites on high-resolution imagery before contacting owners.</span>
+    </div>
+  </div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const API = "http://127.0.0.1:8000";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const isNum = v => v !== null && v !== "" && Number.isFinite(+v);
+const num = (v, d = 0) => isNum(v) ? (+v).toLocaleString(undefined, {maximumFractionDigits: d}) : "Not available";
+const cap = s => s ? String(s).replace(/_/g, " ").replace(/^./, c => c.toUpperCase()) : "Not available";
+const fmtDate = s => { const d = new Date(s); return s && !isNaN(d) ? d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"numeric"}) : "Not available"; };
+
+const PENDING = ["Reading your request", "Finding the place", "Finding imagery", "Measuring footprints", "Scoring sites", "Writing the summary"];
+const NAMES = ["Intent", "Location", "Satellite imagery", "Buildings", "Ranking", "Decision"];
+const STAGE_TO_STEP = {deepseek:0, deepseek_json:0, intent:0, location_extraction:0, geocoding:1, satellite:2, latest_satellite:2, building_data:3, scoring:4};
+const STAGE_MSG = {
+  0: "SkyLens could not understand the request. Try rephrasing it with a place name.",
+  1: "SkyLens could not find that place on the map. Try a more specific location.",
+  2: "SkyLens could not retrieve satellite imagery for this area.",
+  3: "SkyLens could not load building data for this area. The data provider may be busy; try again.",
+  4: "SkyLens could not rank the buildings."
+};
+
+function steps(done, active, failed = -1, notes = []) {
+  $("steps").innerHTML = NAMES.map((n, i) => {
+    const c = i === failed ? "fail" : i < done ? "done" : i === active ? "active" : "";
+    const mark = i === failed ? "!" : i < done ? "&#10003;" : i + 1;
+    return `<li class="${c}"><span class="dot">${mark}</span><b>${n}</b><small>${esc(i < done && notes[i] ? notes[i] : PENDING[i])}</small></li>`;
+  }).join("");
+}
+
+// ---------- errors ----------
+function apiError(status, body) {
+  const d = body && body.detail;
+  if (d && typeof d === "object" && !Array.isArray(d)) return {stage: d.stage, text: d.error || d.message || ""};
+  if (Array.isArray(d)) return {stage: "request", text: "The request was not valid."};
+  return {stage: "unknown", text: typeof d === "string" ? d : "Request failed (" + status + ")."};
+}
+function showError(e, active) {
+  let step = STAGE_TO_STEP[e.stage];
+  if (step === undefined) step = e.stage === "network" ? active : -1;
+  steps(Math.max(step, 0), -1, step);
+  const msg = e.stage === "network"
+    ? `SkyLens could not reach the backend at ${API}. Check that FastAPI is running.`
+    : (STAGE_MSG[step] || "Something went wrong during the analysis.");
+  $("error").hidden = false;
+  $("error").innerHTML = `<h2>Analysis stopped${step >= 0 ? " at " + NAMES[step].toLowerCase() : ""}</h2><p>${esc(msg)}</p>${e.text && e.stage !== "network" ? `<p class="sm muted">Detail: ${esc(e.text)}</p>` : ""}`;
+}
+
+// ---------- run ----------
+let timers = [];
+async function run() {
+  const q = $("q").value.trim();
+  if (!q) return;
+  $("go").disabled = true; $("go").textContent = "Analyzing...";
+  $("report").hidden = false; $("result").hidden = true; $("error").hidden = true; $("intro").hidden = true;
+  let active = 0; steps(0, 0);
+  // One request serves all stages, so progress shown while waiting is an estimate.
+  [2500, 1500, 4000, 9000].forEach((_, k, a) => timers.push(setTimeout(() => { active = k + 1; steps(active, active); }, a.slice(0, k + 1).reduce((x, y) => x + y))));
+  try {
+    const res = await fetch(API + "/analyze", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({query: q})});
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body) throw apiError(res.status, body);
+    timers.forEach(clearTimeout);
+    render(body);
+  } catch (e) {
+    timers.forEach(clearTimeout);
+    showError(e && e.stage ? e : {stage: "network", text: ""}, active);
+  } finally {
+    $("go").disabled = false; $("go").textContent = "Analyze with SkyLens";
+  }
+}
+
+// ---------- render ----------
+let map, layer, markers = [], prospects = [];
+function render(d) {
+  const intent = d.intent || {}, loc = d.resolved_location || {}, an = d.analysis || {}, dec = d.decision || {}, sat = d.satellite;
+  prospects = Array.isArray(d.top_prospects) ? d.top_prospects : [];
+  const radius = d.search_area && isNum(d.search_area.radius_km) ? +d.search_area.radius_km : null;
+  const place = (loc.name || "").split(",").slice(0, 2).join(",").trim() || "Unknown location";
+  const solar = JSON.stringify(intent).toLowerCase().includes("solar");
+  const req = intent.requirements && typeof intent.requirements === "object" ? intent.requirements : {};
+
+  $("intro").hidden = false;
+  $("intro").innerHTML = `<div class="muted sm">Your question</div><q>${esc(d.query)}</q>
+    <div class="chips"><span class="chip"><b>${solar ? "Solar Prospecting" : esc(cap(intent.intent_type))}</b></span>
+    <span class="chip">${esc(place)}</span>
+    <span class="chip">Search radius: ${radius === null ? "Not available" : radius + " km"}</span>
+    ${req.building_type ? `<span class="chip">Building type: ${esc(cap(req.building_type))}</span>` : ""}
+    ${isNum(an.minimum_area_m2) ? `<span class="chip">Minimum footprint: ${num(an.minimum_area_m2)} m&sup2;</span>` : ""}</div>`;
+
+  const total = an.total_candidates, short = an.shortlisted ?? prospects.length;
+  const notes = ["Request understood", place, sat ? "Latest scene found" : "No scene found", isNum(total) ? num(total) + " buildings" : "Buildings loaded", num(short) + " ranked", "Recommendation ready"];
+  steps(6, -1, -1, notes);
+
+  const conf = String(dec.confidence || "").toLowerCase();
+  const top = prospects[0];
+  const comm = prospects.filter(p => ["commercial", "industrial", "retail", "office", "warehouse"].includes(String(p.building_type || "").toLowerCase())).length;
+  const why = [];
+  if (top) why.push(`The top site scores ${num(top.solar_score)} out of 100${top.reasons && top.reasons[0] ? ": " + esc(top.reasons[0].toLowerCase()) : ""}.`);
+  if (prospects.length) why.push(`${comm} of the top ${prospects.length} are tagged commercial or industrial in map data.`);
+  $("decision").innerHTML = `<div>
+      <h2>${isNum(total) ? `Found ${num(total)} candidate building${+total === 1 ? "" : "s"}` : esc(dec.summary || "Analysis complete")}</h2>
+      <div>${isNum(total) && +total > 0 ? `Top ${num(short)} have been ranked for solar prospecting.` : "No buildings matched the requested minimum area."}</div>
+      ${why.length ? `<ul class="why">${why.map(w => `<li>${w}</li>`).join("")}</ul>` : ""}</div>
+    <div><div class="muted sm">Confidence</div><span class="badge ${conf}">${esc(cap(conf))}</span>
+      <div class="action"><div class="muted sm">Recommended action</div>${esc(dec.recommended_action || "Not available")}</div></div>`;
+
+  $("list").innerHTML = prospects.length ? prospects.map((p, i) => cardHtml(p, i)).join("") : `<p class="muted">No prospects to show.</p>`;
+  $("list").onclick = e => { const c = e.target.closest(".card"); if (c) select(+c.dataset.i, true); };
+
+  const img = sat && sat.visual_url;
+  $("evidence").innerHTML = `<h2>Satellite evidence</h2><div class="ev"><div class="img" id="satimg">${img ? "" : "<span class='muted'>No imagery returned.</span>"}</div>
+    <div><div class="kv"><span>Satellite ID</span><div style="word-break:break-all">${esc(sat && sat.id || "Not available")}</div>
+    <span>Captured</span><div>${fmtDate(sat && sat.date)}</div>
+    <span>Cloud cover</span><div>${isNum(sat && sat.cloud_cover) ? num(sat.cloud_cover, 1) + "%" : "Not available"}</div></div>
+    <p class="sm muted">Context imagery only. It does not confirm usable roof area.</p></div></div>`;
+  if (img) {
+    const im = new Image(); im.alt = "Latest satellite scene of the search area";
+    im.onload = () => $("satimg").replaceChildren(im);
+    im.onerror = () => { $("satimg").innerHTML = "<span class='muted sm'>This scene cannot be previewed in the browser. Its details are shown at right.</span>"; };
+    im.src = img;
+  }
+
+  const lims = Array.isArray(d.limitations) && d.limitations.length ? d.limitations : ["Building footprint is not equivalent to usable roof area.", "Solar suitability has not been verified from high-resolution imagery.", "Ownership, roof condition, structural suitability and shading require additional verification."];
+  $("limits").innerHTML = `<h2>What this analysis does not tell you</h2><ul>${lims.map(l => `<li>${esc(l)}</li>`).join("")}</ul>`;
+
+  $("result").hidden = false;
+  draw(loc, radius);
+  $("report").scrollIntoView({behavior: "smooth"});
+}
+
+function reasonsHtml(p) { return Array.isArray(p.reasons) && p.reasons.length ? `<ul>${p.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : "<div class='sm muted'>No reasons returned.</div>"; }
+function coords(p) { return isNum(p.latitude) && isNum(p.longitude) ? (+p.latitude).toFixed(5) + ", " + (+p.longitude).toFixed(5) : "Not available"; }
+function cardHtml(p, i) {
+  const c = String(p.confidence || "").toLowerCase(), s = isNum(p.solar_score) ? Math.max(0, Math.min(100, +p.solar_score)) : 0;
+  return `<article class="card" data-i="${i}" tabindex="0"><div class="hd"><span class="rank">#${i + 1}</span>
+    <div><span class="badge ${c}">${esc(cap(c))} confidence</span>${p.name ? `<div class="sm">${esc(p.name)}</div>` : ""}</div>
+    <div class="score"><b>${isNum(p.solar_score) ? num(p.solar_score) : "-"}</b><br>Solar score</div></div>
+    <div class="bar"><i style="width:${s}%"></i></div>
+    <div class="kv"><span>Footprint area</span><div>${num(p.area_m2)} m&sup2;</div><span>Building type</span><div>${esc(cap(p.building_type))}</div><span>Latitude / longitude</span><div>${coords(p)}</div></div>
+    <div class="sm muted">Why SkyLens ranked it</div>${reasonsHtml(p)}</article>`;
+}
+
+function draw(loc, radius) {
+  if (!map) {
+    map = L.map("map");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "&copy; OpenStreetMap contributors"}).addTo(map);
+    layer = L.layerGroup().addTo(map);
+  }
+  layer.clearLayers(); markers = [];
+  map.invalidateSize();
+  const pts = [];
+  if (isNum(loc.latitude) && isNum(loc.longitude)) {
+    const lat = +loc.latitude, lon = +loc.longitude, r = radius || 1;
+    const dl = r / 111, dn = r / (111 * Math.max(Math.abs(Math.cos(lat * Math.PI / 180)), 0.1));
+    const b = [[lat - dl, lon - dn], [lat + dl, lon + dn]];
+    L.rectangle(b, {color: "#fff", weight: 2, dashArray: "6 6", fillOpacity: 0.04}).bindTooltip("Search area").addTo(layer);
+    pts.push(...b);
+  }
+  prospects.forEach((p, i) => {
+    if (!isNum(p.latitude) || !isNum(p.longitude)) { markers[i] = null; return; }
+    const first = i === 0, size = first ? 40 : 30;
+    const m = L.marker([+p.latitude, +p.longitude], {zIndexOffset: first ? 1000 : 0, icon: L.divIcon({className: "", html: `<div class="pin ${first ? "top" : ""}">${i + 1}</div>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2]})}).addTo(layer);
+    m.bindPopup(`<div class="pop"><b>#${i + 1} ${esc(p.name || cap(p.building_type) + " building")}</b><br>Solar score ${num(p.solar_score)} (${esc(cap(p.confidence).toLowerCase())} confidence)<br>Footprint ${num(p.area_m2)} m&sup2;<br>${coords(p)}${reasonsHtml(p)}</div>`);
+    m.on("click", () => select(i, false));
+    markers[i] = m; pts.push([+p.latitude, +p.longitude]);
+  });
+  pts.length ? map.fitBounds(pts, {padding: [30, 30]}) : map.setView([20, 0], 2);
+}
+
+function select(i, fly) {
+  document.querySelectorAll(".card").forEach(c => c.classList.toggle("sel", +c.dataset.i === i));
+  markers.forEach((m, k) => { const el = m && m.getElement(); if (el) el.firstChild.classList.toggle("sel", k === i); });
+  const card = document.querySelector(`.card[data-i="${i}"]`); if (card) card.scrollIntoView({block: "nearest", behavior: "smooth"});
+  const m = markers[i]; if (!m) return;
+  if (fly) map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 16), {duration: 0.6});
+  m.openPopup();
+}
+
+$("go").onclick = run;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(); });
+$("list").addEventListener("keydown", e => { const c = e.target.closest(".card"); if (c && e.key === "Enter") select(+c.dataset.i, true); });
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-soon]"); if (!b) return;
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = b.dataset.soon; document.body.appendChild(t); setTimeout(() => t.remove(), 2600);
+});
+</script>
+</body>
+</html>
