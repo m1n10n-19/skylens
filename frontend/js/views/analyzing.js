@@ -50,7 +50,7 @@
       case "intent":
         return done ? (d.title || "Understood, but no analysis module yet") : "Reading your question";
       case "location":
-        return done ? SL.shortPlace(d.name)
+        return done ? (d.description ? SL.cap(d.description) : SL.shortPlace(d.name))
           : run.steps.intent && run.steps.intent.location ? `Looking up ${run.steps.intent.location}`
           : "Finding the place on the map";
       case "evidence":
@@ -143,12 +143,11 @@
       const loc = run.steps.location;
       if (loc && loc.status === "done" && !this.drawnLocation) {
         this.drawnLocation = true;
-        const box = SL.maps.searchBox(loc.latitude, loc.longitude, loc.radius_km);
-        L.rectangle(box, {color: "#fff", weight: 1.5, dashArray: "6 6", fill: false}).addTo(this.map);
+        const area = SL.maps.searchLayer(loc, loc.latitude, loc.longitude).addTo(this.map);
         SL.maps.placeTag(loc.latitude, loc.longitude, SL.shortPlace(loc.name).split(",")[0]).addTo(this.map);
-        this.map.flyToBounds(box, {padding: [40, 40], duration: 1.2});
+        this.map.flyToBounds(area.getBounds(), {padding: [40, 40], duration: 1.2});
       }
-      if (run.preview && !this.drawnPreview) {
+      if (run.preview && !this.drawnPreview && this.drawnLocation) {
         this.drawnPreview = true;
         run.preview.preview.forEach(p => {
           const layer = SL.maps.parcel(p.geometry, false) ||

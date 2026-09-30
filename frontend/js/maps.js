@@ -107,6 +107,16 @@
         `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${shapes}</svg></div>`;
     },
 
+    // Dashed outline of the searched area (box, place boundary or road
+    // corridor). Results saved before search areas existed only have
+    // a radius, so fall back to the box.
+    searchLayer(area, lat, lon) {
+      const style = {color: "#fff", weight: 1.5, dashArray: "6 6", fill: false, interactive: false};
+      if (area && area.geometry) return L.geoJSON(area.geometry, {style});
+      const radius = (area && area.radius_km) || 1;
+      return L.rectangle(SL.maps.searchBox(lat, lon, radius), style);
+    },
+
     // Square [[s, w], [n, e]] around a point, radius in km.
     searchBox(lat, lon, radiusKm) {
       const dLat = radiusKm / 111;

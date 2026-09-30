@@ -66,6 +66,34 @@
     return SL.esc(crit.evidence || SL.fmt(s));
   }
 
+  // How "find similar sites nearby" can widen this search, or null.
+  // {label, radiusKm, text}; text also explains why it can't.
+  SL.widenOption = result => {
+    const area = result.search_area || {};
+    if (area.kind === "place") return null;
+    if (area.kind === "corridor") {
+      const road = area.road || {};
+      return road.half_width_m < 1000 ? {
+        label: "Widen the strip to 1 km either side",
+        radiusKm: 1,
+        text: `Search 1 km either side of ${road.name} (this one used ${road.half_width_m} m).`,
+      } : null;
+    }
+    const radius = area.radius_km || 1;
+    return radius < 2 ? {
+      label: "Search within 2 km",
+      radiusKm: 2,
+      text: `Run the same question over a 2 km radius (this one used ${radius} km).`,
+    } : null;
+  };
+
+  SL.widenBlockedText = result => {
+    const area = result.search_area || {};
+    if (area.kind === "place") return `Already searching all of ${area.name}.`;
+    if (area.kind === "corridor") return "Already searching 1 km either side of the road.";
+    return "Already searching the maximum 2 km radius.";
+  };
+
   SL.facts = {
 
     level,

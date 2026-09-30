@@ -20,6 +20,8 @@ from geodata import (
 
 from satellite import get_latest_satellite
 
+import search_area
+
 from scoring import score_candidate
 
 from use_cases import (
@@ -29,11 +31,6 @@ from use_cases import (
     describe_use_case,
 )
 
-
-DEFAULT_RADIUS_KM = 1
-
-# MVP safety limit
-MAX_RADIUS_KM = 2
 
 TOP_N = 10
 
@@ -125,6 +122,36 @@ def not_implemented_response(query, intent, spec, use_case):
     }
 
 
+def area_too_large_response(query, intent, spec, use_case, error):
+
+    return {
+
+        "status": "area_too_large",
+
+        "query": query,
+
+        "intent": intent,
+
+        "analysis_spec": spec.model_dump(),
+
+        "use_case": describe_use_case(use_case),
+
+        "message": (
+            f"{error.name} covers about {error.area_km2:,.0f} km², which is "
+            f"too large to analyse in one go: SkyLens searches up to about "
+            f"{search_area.MAX_SEARCH_KM2} km² at a time. Name a "
+            f"neighbourhood, a road or a landmark instead, e.g. "
+            f"\"Thoraipakkam, Chennai\" or \"along ECR near Kovalam\"."
+        ),
+
+        "location": error.name,
+
+        "area_km2": round(error.area_km2),
+
+        "max_area_km2": search_area.MAX_SEARCH_KM2,
+    }
+
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -144,53 +171,6 @@ def area_filter(spec, use_case):
         minimum = use_case.default_min_area_m2
 
     return float(minimum), area.max_m2
-
-
-def _radius(spec):
-
-    radius_km = spec.radius_km or DEFAULT_RADIUS_KM
-
-    return min(float(radius_km), MAX_RADIUS_KM)
-
-
-def _geocode(geolocator, location_name):
-
-    print("\nSTEP 2: Geocoding:", repr(location_name))
-
-    try:
-
-        result = geolocator.geocode(location_name)
-
-    except Exception as e:
-
-        print("\nGEOCODING FAILED")
-        print(repr(e))
-
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "stage": "geocoding",
-                "location_text": location_name,
-                "error_type": type(e).__name__,
-                "error": str(e),
-            },
-        )
-
-    if not result:
-
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "stage": "geocoding",
-                "location_text": location_name,
-                "error": f"Location not found: {location_name}",
-            },
-        )
-
-    print("STEP 2 COMPLETE")
-    print("Coordinates (Nominatim):", result.latitude, result.longitude)
-
-    return result
 
 
 def _satellite(latitude, longitude, radius_km):
@@ -227,8 +207,7 @@ def _satellite(latitude, longitude, radius_km):
     return satellite, "loaded"
 
 
-def _candidates(use_case, latitude, longitude, radius_km, minimum, maximum,
-                place):
+def _candidates(use_case, area, minimum, maximum, place):
     """
     Candidates plus the scoring context. For land and sites the
     context layers come from the same Overpass request.
@@ -248,11 +227,13 @@ def _candidates(use_case, latitude, longitude, radius_km, minimum, maximum,
         if source == "buildings":
 
             candidates = get_buildings(
-                latitude=latitude,
-                longitude=longitude,
-                radius_km=radius_km,
+                latitude=area.latitude,
+                longitude=area.longitude,
+                radius_km=area.reach_km,
                 minimum_area_m2=minimum,
                 include_geometry=True,
+                # Boxes keep the original query (and its cache).
+                area_filters=None if area.kind == "radius" else area.overpass_filters,
             )
 
             if maximum:
@@ -260,7 +241,7 @@ def _candidates(use_case, latitude, longitude, radius_km, minimum, maximum,
                     c for c in candidates if c["area_m2"] <= maximum
                 ]
 
-            context = new_context(latitude, longitude, radius_km, place)
+            context = new_context(area.latitude, area.longitude, area.reach_km, place)
 
             context.layer_status["building_footprints"] = "loaded"
 
@@ -275,8 +256,7 @@ def _candidates(use_case, latitude, longitude, radius_km, minimum, maximum,
             print("Context layers requested:", sorted(layers))
 
             candidates, context = collect_candidates_and_context(
-                source, latitude, longitude, radius_km,
-                minimum, maximum, layers, place
+                source, area, minimum, maximum, layers, place
             )
 
     except Exception as e:
@@ -408,22 +388,28 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
             },
         )
 
-    location = _geocode(geolocator, spec.location)
+    print("\nSTEP 2: Resolving search area:", repr(spec.location))
 
-    latitude = location.latitude
+    try:
+        area = search_area.resolve(geolocator, spec.location, spec.radius_km)
+    except search_area.AreaTooLarge as e:
+        print("AREA TOO LARGE:", e)
+        return area_too_large_response(query, intent, spec, use_case, e)
 
-    longitude = location.longitude
+    latitude = area.latitude
 
-    radius_km = _radius(spec)
+    longitude = area.longitude
 
-    print("\nSTEP 3: Search radius:", radius_km, "km")
+    print("STEP 2 COMPLETE:", area.description)
 
     step(
         "location", "done",
-        name=location.address,
+        name=area.address,
         latitude=latitude,
         longitude=longitude,
-        radius_km=radius_km,
+        kind=area.kind,
+        description=area.description,
+        geometry=area.geometry,
     )
 
     step("evidence", "done", layers=describe_use_case(use_case)["data_layers"])
@@ -434,7 +420,7 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
     # Data collection
     # --------------------------------------------------------
 
-    satellite, satellite_status = _satellite(latitude, longitude, radius_km)
+    satellite, satellite_status = _satellite(latitude, longitude, min(area.reach_km, 5))
 
     emit("layer", {
         "id": "satellite_imagery",
@@ -447,9 +433,7 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     place = spec.location.split(",")[0].strip()
 
-    candidates, context = _candidates(
-        use_case, latitude, longitude, radius_km, minimum, maximum, place
-    )
+    candidates, context = _candidates(use_case, area, minimum, maximum, place)
 
     for layer in context.layer_status:
         emit("layer", {"id": layer, "status": "used"})
@@ -559,7 +543,7 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
             if not (c.evaluator and data_layer_available(c.data_layer))
         ] + list(use_case.unassessed)
 
-    limitations = list(use_case.limitations)
+    limitations = [f"Searched {area.description}."] + list(use_case.limitations)
 
     # Map data failures abort the analysis (502), so imagery is the
     # only layer that can be missing from a successful report.
@@ -587,14 +571,12 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         "use_case": describe_use_case(use_case),
 
         "resolved_location": {
-            "name": location.address,
+            "name": area.address,
             "latitude": latitude,
             "longitude": longitude,
         },
 
-        "search_area": {
-            "radius_km": radius_km,
-        },
+        "search_area": area.public(),
 
         "satellite": satellite,
 

@@ -35,7 +35,9 @@
           <p><b>Recommended action:</b> ${SL.esc(r.decision.recommended_action)}</p>
           <table class="rp-table">
             <tr><th>Location</th><td>${SL.esc(loc.name)} (${loc.latitude.toFixed(5)}, ${loc.longitude.toFixed(5)})</td></tr>
-            <tr><th>Search radius</th><td>${r.search_area.radius_km} km</td></tr>
+            <tr><th>Search area</th><td>${r.search_area.description
+              ? `${SL.esc(SL.cap(r.search_area.description))} (≈ ${SL.fmt(r.search_area.area_km2, 1)} km²)`
+              : `${r.search_area.radius_km} km radius`}</td></tr>
             <tr><th>Candidates evaluated</th><td>${SL.fmt(an.total_candidates)} ${SL.esc(String(an.candidate_type || "").replace(/_/g, " "))}s</td></tr>
             <tr><th>Size filter</th><td>${SL.isNum(an.minimum_area_m2) ? "≥ " + SL.fmt(an.minimum_area_m2) + " m²" : "–"}
               ${SL.isNum(an.maximum_area_m2) ? " and ≤ " + SL.fmt(an.maximum_area_m2) + " m²" : ""}

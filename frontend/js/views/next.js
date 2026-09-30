@@ -11,8 +11,7 @@
 
       const success = r.status === "success";
       const top = (success && r.top_prospects) || [];
-      const radius = success ? r.search_area.radius_km : null;
-      const canWiden = success && radius < 2;
+      const widen = success ? SL.widenOption(r) : null;
 
       el.innerHTML = `
         <section class="page narrow">
@@ -34,11 +33,9 @@
               <small>Needs demand and revenue data that SkyLens doesn't have yet.</small>
               <span class="soon">Coming soon</span></div>
 
-            <button class="next-card" id="similar" ${canWiden ? "" : "disabled"}>
+            <button class="next-card" id="similar" ${widen ? "" : "disabled"}>
               ${SL.icon("pin", 26)}<b>Find similar sites nearby</b>
-              <small>${canWiden
-                ? `Run the same question over a 2 km radius (this one used ${radius} km).`
-                : "Already searching the maximum 2 km radius."}</small></button>
+              <small>${SL.esc(widen ? widen.text : success ? SL.widenBlockedText(r) : "Needs a completed analysis.")}</small></button>
 
             <a class="next-card" href="#/report/${id}">
               ${SL.icon("file", 26)}<b>Generate a detailed report</b>
@@ -53,7 +50,7 @@
         </section>`;
 
       const similar = SL.$("#similar", el);
-      if (canWiden) similar.onclick = () => SL.startAnalysis(r.query, 2);
+      if (widen) similar.onclick = () => SL.startAnalysis(r.query, widen.radiusKm);
 
       SL.$("#ask2", el).addEventListener("submit", e => {
         e.preventDefault();

@@ -76,13 +76,6 @@ def bbox_around(latitude, longitude, radius_km):
     )
 
 
-def _bbox_str(latitude, longitude, radius_km):
-
-    s, w, n, e = bbox_around(latitude, longitude, radius_km)
-
-    return f"{s},{w},{n},{e}"
-
-
 def _polygon(geometry, proj):
 
     if not geometry or len(geometry) < 3:
@@ -433,29 +426,26 @@ def _context_statements(layers):
     return statements
 
 
-def collect_candidates_and_context(source, latitude, longitude, radius_km,
-                                   min_area_m2, max_area_m2=None,
+def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
                                    layers=(), location_name=None):
     """
-    ONE Overpass request returning the candidate polygons and the
-    context layers (roads, POIs, parking, chargers) around them.
-    One request uses one rate-limit slot instead of two.
+    ONE Overpass request returning the candidate polygons inside the
+    search area (search_area.SearchArea) and the context layers
+    (roads, POIs, parking, chargers) around them. One request uses
+    one rate-limit slot instead of two.
 
     Returns (candidates, context). Raises OverpassError if the map
     data provider is unavailable.
     """
 
-    radius_km = min(radius_km, 2)
-
-    context = new_context(latitude, longitude, radius_km, location_name)
+    context = new_context(area.latitude, area.longitude, area.reach_km, location_name)
 
     layers = [layer for layer in layers if layer in CONTEXT_LAYERS]
 
-    bbox = _bbox_str(latitude, longitude, radius_km)
-
     selectors = "\n  ".join(
-        f"{selector}({bbox});"
+        f"{selector}{area_filter};"
         for selector in candidate_selectors(source)
+        for area_filter in area.overpass_filters
     )
 
     query = (

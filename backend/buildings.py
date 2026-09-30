@@ -12,21 +12,41 @@ def get_buildings(
     longitude: float,
     radius_km: float = 1,
     minimum_area_m2: float = 500,
-    include_geometry: bool = False
+    include_geometry: bool = False,
+    area_filters=None
 ):
     """
     OSM building footprints around a location, largest first.
 
     include_geometry adds an internal "_polygon" (lon/lat shapely
     polygon) used by the analysis pipeline to draw footprints.
+
+    area_filters (Overpass filters from search_area.SearchArea, e.g. a
+    road corridor) replace the box around the location.
     """
 
-    # MVP safety limit
-    radius_km = min(radius_km, 2)
+    if area_filters:
 
-    south, west, north, east = bbox_around(latitude, longitude, radius_km)
+        body = "\n    ".join(f'way["building"]{f};' for f in area_filters)
 
-    query = f"""
+        query = f"""
+    [out:json][timeout:60];
+
+    (
+    {body}
+    );
+
+    out geom;
+    """
+
+    else:
+
+        # MVP safety limit
+        radius_km = min(radius_km, 2)
+
+        south, west, north, east = bbox_around(latitude, longitude, radius_km)
+
+        query = f"""
     [out:json][timeout:25];
 
     way["building"]

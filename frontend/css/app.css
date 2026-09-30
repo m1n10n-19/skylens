@@ -478,3 +478,7 @@ body[data-view="report"] { background: #eef0ec; }
 .login-card .btn-lime:disabled { opacity: .6; cursor: wait; }
 .login-card .back { align-self: center; margin: 0; }
 .login-error { color: var(--bad); font-size: 14px; margin: 0; }
+
+.searched { color: var(--muted); font-size: 13.5px; display: flex; gap: 6px; align-items: baseline; }
+.searched .ic { color: var(--lime); vertical-align: -2px; }
+.empty-map { margin-top: 12px; min-height: 520px; }

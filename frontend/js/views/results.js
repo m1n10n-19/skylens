@@ -17,7 +17,28 @@
     land_acquisition: "Find vacant land above 1 acre near OMR with good road access",
   };
 
+  function tooLarge(el, r) {
+    el.innerHTML = `
+      <section class="page narrow">
+        <a class="back" href="#/">${SL.icon("arrowLeft", 16)} Ask another question</a>
+        <h1>That area is too large to analyse at once</h1>
+        <p class="q-echo">"${SL.esc(r.query)}"</p>
+        <div class="card understood">
+          <div class="tags">
+            ${r.use_case ? `<span class="tag tag-lime">${SL.esc(r.use_case.title)}</span>` : ""}
+            <span class="tag">${SL.icon("pin", 13)} ${SL.esc(r.location)}</span>
+          </div>
+          <p>${SL.esc(r.message)}</p>
+          <p class="muted sm">SkyLens reads live map data for the area it searches, so each search is kept to
+            about ${SL.fmt(r.max_area_km2)} km². A road is searched as a strip along it.</p>
+          <div class="row-gap"><button class="btn-lime" id="edit">Edit question</button></div>
+        </div>
+      </section>`;
+    SL.$("#edit", el).onclick = () => { SL.pendingQuery = r.query; SL.go("#/"); };
+  }
+
   function understood(el, r) {
+    if (r.status === "area_too_large") return tooLarge(el, r);
     const spec = r.analysis_spec || {};
     const det = r.detected_requirements || {};
     const implemented = (r.supported_use_cases || []).filter(u => u.implemented);
@@ -92,6 +113,7 @@
               <a class="back" href="#/">${SL.icon("arrowLeft", 16)} Ask another question</a>
               <h1>SkyLens Decision</h1>
               <p class="lead">${subtitle}</p>
+              ${r.search_area.description ? `<p class="searched">${SL.icon("pin", 14)} Searched ${SL.esc(r.search_area.description)}</p>` : ""}
               <p class="q-echo">"${SL.esc(r.query)}"</p>
             </div>
             <div class="head-actions">
@@ -139,11 +161,11 @@
             <p>${SL.esc(r.decision.summary)}</p>
             <p class="muted">${SL.esc(r.decision.recommended_action)}</p>
             <div class="row-gap">
-              ${(r.search_area.radius_km || 0) < 2
-                ? `<button class="btn-lime" id="widen">${SL.icon("refresh", 16)} Search within 2 km</button>` : ""}
+              ${SL.widenOption(r) ? `<button class="btn-lime" id="widen">${SL.icon("refresh", 16)} ${SL.esc(SL.widenOption(r).label)}</button>` : ""}
               <button class="btn-outline" id="edit">Edit question</button>
             </div>
-          </div>`}
+          </div>
+          <div class="card map-card empty-map"><div id="res-map"></div></div>`}
 
           <div class="decision-note card">
             <div>
@@ -183,20 +205,20 @@
       document.addEventListener("click", this.closeMenu);
       SL.$("#dl", el).onclick = () => downloadJSON(r);
 
-      if (!top.length) {
-        const widen = SL.$("#widen", el);
-        if (widen) widen.onclick = () => SL.startAnalysis(r.query, 2);
-        SL.$("#edit", el).onclick = () => { SL.pendingQuery = r.query; SL.go("#/"); };
-        return;
-      }
-
-      // ---- map
+      // ---- map: the searched area, then the ranked sites
       const map = this.map = SL.maps.create(SL.$("#res-map", el), {zoomControl: true});
       map.zoomControl.setPosition("bottomright");
       const loc = r.resolved_location;
-      const box = SL.maps.searchBox(loc.latitude, loc.longitude, r.search_area.radius_km);
-      L.rectangle(box, {color: "#fff", weight: 1.5, dashArray: "6 6", fill: false, interactive: false}).addTo(map);
+      const areaLayer = SL.maps.searchLayer(r.search_area, loc.latitude, loc.longitude).addTo(map);
       SL.maps.placeTag(loc.latitude, loc.longitude, place.split(",")[0]).addTo(map);
+
+      if (!top.length) {
+        map.fitBounds(areaLayer.getBounds(), {padding: [30, 30]});
+        const widen = SL.$("#widen", el);
+        if (widen) widen.onclick = () => SL.startAnalysis(r.query, SL.widenOption(r).radiusKm);
+        SL.$("#edit", el).onclick = () => { SL.pendingQuery = r.query; SL.go("#/"); };
+        return;
+      }
 
       const points = [];
       top.slice().reverse().forEach(c => {
@@ -208,7 +230,7 @@
           .addTo(map);
         points.push([c.latitude, c.longitude]);
       });
-      map.fitBounds(L.latLngBounds(points).extend(box[0]).extend(box[1]), {padding: [30, 30]});
+      map.fitBounds(L.latLngBounds(points).extend(areaLayer.getBounds()), {padding: [30, 30]});
     },
 
     destroy() {
