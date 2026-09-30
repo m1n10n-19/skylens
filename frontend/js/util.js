@@ -3,7 +3,9 @@ window.SL = window.SL || {};
 
 (function (SL) {
 
-  SL.API = "http://127.0.0.1:8000";
+  // The local dev server (port 5500) talks to uvicorn on :8000;
+  // anywhere else the backend serves this page, so use the same origin.
+  SL.API = location.port === "5500" ? "http://127.0.0.1:8000" : "";
 
   SL.FREE_INTENTS = 3;
 

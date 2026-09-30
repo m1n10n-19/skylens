@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from typing import Optional
 
@@ -1045,3 +1046,19 @@ def analyze_stream(
         headers={"Cache-Control": "no-cache"}
     )
 
+
+# ============================================================
+# FRONTEND
+# ============================================================
+
+# Serve the frontend from the same origin (used on Render).
+# Mounted last so the API routes above take precedence.
+
+app.mount(
+    "/",
+    StaticFiles(
+        directory=os.path.join(BASE_DIR, "frontend"),
+        html=True
+    ),
+    name="frontend"
+)

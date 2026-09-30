@@ -37,7 +37,7 @@
         return `The analysis took longer than ${SL.TIMEOUT_MS / 1000} seconds, so SkyLens stopped waiting. ` +
           "The map data provider is probably busy; try again in a minute. Queries that already succeeded are cached.";
       case "network":
-        return `SkyLens could not reach the backend at ${SL.API}. Check that it is running.`;
+        return `SkyLens could not reach the backend at ${SL.API || location.origin}. Check that it is running.`;
       default:
         return "Something went wrong during the analysis.";
     }

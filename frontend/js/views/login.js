@@ -63,7 +63,7 @@
             body: JSON.stringify({username: user.value, password: pass.value}),
           });
         } catch (err) {
-          return fail(`Can't reach the backend at ${SL.API}. Check that it is running.`);
+          return fail(`Can't reach the backend at ${SL.API || location.origin}. Check that it is running.`);
         }
 
         const body = await response.json().catch(() => null);
