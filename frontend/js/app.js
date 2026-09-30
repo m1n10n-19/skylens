@@ -15,6 +15,7 @@
           ? `<span class="pill" title="Signed in: no question limit">Unlimited · ${SL.esc(SL.session.username)}</span>`
           : `<a class="pill${left ? "" : " pill-out"}" href="#/upgrade"
                title="Demo counter, stored in this browser">Free intents: ${left} / ${SL.FREE_INTENTS}</a>`}
+        <a class="btn-ghost about-link" href="#/about" aria-label="About SkyLens" title="About SkyLens">${SL.icon("info", 14)}<span>About</span></a>
         <a class="btn-ghost" href="#/projects">Projects</a>
         ${SL.unlimited()
           ? `<button class="btn-ghost" id="logout">Log out</button>`
@@ -57,6 +58,7 @@
     [/^#\/upgrade$/, "upgrade"],
     [/^#\/projects$/, "projects"],
     [/^#\/login$/, "login"],
+    [/^#\/about$/, "about"],
   ];
 
   let current = null;

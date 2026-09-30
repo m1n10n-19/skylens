@@ -114,6 +114,7 @@ window.SL = window.SL || {};
     grid: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
     copy: "M9 9h11v11H9zM5 15H4V4h11v1",
     refresh: "M20 12a8 8 0 11-2.3-5.7M20 4v5h-5",
+    info: "M12 21a9 9 0 100-18 9 9 0 000 18zM12 11v5M12 8v.01",
   };
 
   SL.icon = (name, size = 18, cls = "") =>
