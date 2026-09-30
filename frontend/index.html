@@ -108,6 +108,8 @@ h2{margin:0 0 12px;font-size:17px}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const API = "http://127.0.0.1:8000";
+// Slightly above the backend's worst case (Overpass budget 100 s + DeepSeek, geocoding, imagery).
+const TIMEOUT_MS = 150000;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const isNum = v => v !== null && v !== "" && Number.isFinite(+v);
@@ -115,15 +117,15 @@ const num = (v, d = 0) => isNum(v) ? (+v).toLocaleString(undefined, {maximumFrac
 const cap = s => s ? String(s).replace(/_/g, " ").replace(/^./, c => c.toUpperCase()) : "Not available";
 const fmtDate = s => { const d = new Date(s); return s && !isNaN(d) ? d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"numeric"}) : "Not available"; };
 
-const PENDING = ["Reading your request", "Finding the place", "Finding imagery", "Measuring footprints", "Scoring sites", "Writing the summary"];
-const NAMES = ["Intent", "Location", "Satellite imagery", "Buildings", "Ranking", "Decision"];
-const STAGE_TO_STEP = {deepseek:0, deepseek_json:0, intent:0, location_extraction:0, geocoding:1, satellite:2, latest_satellite:2, building_data:3, scoring:4};
+const PENDING = ["Reading your request", "Finding the place", "Finding imagery", "Collecting map data", "Scoring sites", "Writing the summary"];
+const NAMES = ["Intent", "Location", "Satellite imagery", "Candidates", "Ranking", "Decision"];
+const STAGE_TO_STEP = {deepseek:0, deepseek_json:0, intent:0, location_extraction:0, geocoding:1, satellite:2, latest_satellite:2, building_data:3, candidate_data:3, scoring:4};
 const STAGE_MSG = {
   0: "SkyLens could not understand the request. Try rephrasing it with a place name.",
   1: "SkyLens could not find that place on the map. Try a more specific location.",
   2: "SkyLens could not retrieve satellite imagery for this area.",
-  3: "SkyLens could not load building data for this area. The data provider may be busy; try again.",
-  4: "SkyLens could not rank the buildings."
+  3: "SkyLens could not load map data for this area. The map data provider (OpenStreetMap Overpass) is busy or rate-limiting; wait about a minute and try again.",
+  4: "SkyLens could not rank the candidates."
 };
 
 function steps(done, active, failed = -1, notes = []) {
@@ -142,14 +144,17 @@ function apiError(status, body) {
   return {stage: "unknown", text: typeof d === "string" ? d : "Request failed (" + status + ")."};
 }
 function showError(e, active) {
+  const local = e.stage === "network" || e.stage === "timeout";
   let step = STAGE_TO_STEP[e.stage];
-  if (step === undefined) step = e.stage === "network" ? active : -1;
+  if (step === undefined) step = local ? active : -1;
   steps(Math.max(step, 0), -1, step);
   const msg = e.stage === "network"
     ? `SkyLens could not reach the backend at ${API}. Check that FastAPI is running.`
+    : e.stage === "timeout"
+    ? `The analysis took longer than ${TIMEOUT_MS / 1000} seconds, so SkyLens stopped waiting. The map data provider is probably busy; wait a minute and try again. Queries that already succeeded are cached and return quickly.`
     : (STAGE_MSG[step] || "Something went wrong during the analysis.");
   $("error").hidden = false;
-  $("error").innerHTML = `<h2>Analysis stopped${step >= 0 ? " at " + NAMES[step].toLowerCase() : ""}</h2><p>${esc(msg)}</p>${e.text && e.stage !== "network" ? `<p class="sm muted">Detail: ${esc(e.text)}</p>` : ""}`;
+  $("error").innerHTML = `<h2>Analysis stopped${step >= 0 ? " at " + NAMES[step].toLowerCase() : ""}</h2><p>${esc(msg)}</p>${e.text && !local ? `<p class="sm muted">Detail: ${esc(e.text)}</p>` : ""}`;
 }
 
 // ---------- run ----------
@@ -157,20 +162,23 @@ let timers = [];
 async function run() {
   const q = $("q").value.trim();
   if (!q) return;
+  timers = [];
   $("go").disabled = true; $("go").textContent = "Analyzing...";
   $("report").hidden = false; $("result").hidden = true; $("error").hidden = true; $("intro").hidden = true;
   let active = 0; steps(0, 0);
   // One request serves all stages, so progress shown while waiting is an estimate.
   [2500, 1500, 4000, 9000].forEach((_, k, a) => timers.push(setTimeout(() => { active = k + 1; steps(active, active); }, a.slice(0, k + 1).reduce((x, y) => x + y))));
   try {
-    const res = await fetch(API + "/analyze", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({query: q})});
+    const ctl = new AbortController();
+    timers.push(setTimeout(() => ctl.abort(), TIMEOUT_MS));
+    const res = await fetch(API + "/analyze", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({query: q}), signal: ctl.signal});
     const body = await res.json().catch(() => null);
     if (!res.ok || !body) throw apiError(res.status, body);
     timers.forEach(clearTimeout);
-    render(body);
+    body.status && body.status !== "success" ? renderNoAnalysis(body) : render(body);
   } catch (e) {
     timers.forEach(clearTimeout);
-    showError(e && e.stage ? e : {stage: "network", text: ""}, active);
+    showError(e && e.stage ? e : {stage: e && e.name === "AbortError" ? "timeout" : "network", text: ""}, active);
   } finally {
     $("go").disabled = false; $("go").textContent = "Analyze with SkyLens";
   }
@@ -183,30 +191,38 @@ function render(d) {
   prospects = Array.isArray(d.top_prospects) ? d.top_prospects : [];
   const radius = d.search_area && isNum(d.search_area.radius_km) ? +d.search_area.radius_km : null;
   const place = (loc.name || "").split(",").slice(0, 2).join(",").trim() || "Unknown location";
-  const solar = JSON.stringify(intent).toLowerCase().includes("solar");
-  const req = intent.requirements && typeof intent.requirements === "object" ? intent.requirements : {};
+  const uc = d.use_case || {}, spec = d.analysis_spec || {};
+  const solar = uc.id ? uc.id === "solar_prospecting" : JSON.stringify(intent).toLowerCase().includes("solar");
+  const req = spec.requirements || (intent.requirements && typeof intent.requirements === "object" ? intent.requirements : {});
+  const noun = String(an.candidate_type || "building").replace(/_/g, " ");
+  const area = spec.area || {};
 
   $("intro").hidden = false;
   $("intro").innerHTML = `<div class="muted sm">Your question</div><q>${esc(d.query)}</q>
-    <div class="chips"><span class="chip"><b>${solar ? "Solar Prospecting" : esc(cap(intent.intent_type))}</b></span>
+    <div class="chips"><span class="chip"><b>${esc(uc.title || (solar ? "Solar Prospecting" : cap(intent.intent_type)))}</b></span>
     <span class="chip">${esc(place)}</span>
     <span class="chip">Search radius: ${radius === null ? "Not available" : radius + " km"}</span>
     ${req.building_type ? `<span class="chip">Building type: ${esc(cap(req.building_type))}</span>` : ""}
-    ${isNum(an.minimum_area_m2) ? `<span class="chip">Minimum footprint: ${num(an.minimum_area_m2)} m&sup2;</span>` : ""}</div>`;
+    ${req.business_type ? `<span class="chip">Business: ${esc(cap(req.business_type))}</span>` : ""}
+    ${area.as_stated ? `<span class="chip">Requested size: ${esc(area.as_stated)}</span>` : ""}
+    ${isNum(an.minimum_area_m2) ? `<span class="chip">Minimum ${solar ? "footprint" : "area"}: ${num(an.minimum_area_m2)} m&sup2;</span>` : ""}</div>`;
 
   const total = an.total_candidates, short = an.shortlisted ?? prospects.length;
-  const notes = ["Request understood", place, sat ? "Latest scene found" : "No scene found", isNum(total) ? num(total) + " buildings" : "Buildings loaded", num(short) + " ranked", "Recommendation ready"];
+  const notes = ["Request understood", place, sat ? "Latest scene found" : "No scene found", isNum(total) ? num(total) + " " + noun + "s" : "Candidates loaded", num(short) + " ranked", "Recommendation ready"];
   steps(6, -1, -1, notes);
 
   const conf = String(dec.confidence || "").toLowerCase();
   const top = prospects[0];
-  const comm = prospects.filter(p => ["commercial", "industrial", "retail", "office", "warehouse"].includes(String(p.building_type || "").toLowerCase())).length;
   const why = [];
-  if (top) why.push(`The top site scores ${num(top.solar_score)} out of 100${top.reasons && top.reasons[0] ? ": " + esc(top.reasons[0].toLowerCase()) : ""}.`);
-  if (prospects.length) why.push(`${comm} of the top ${prospects.length} are tagged commercial or industrial in map data.`);
+  if (top) why.push(`The top site scores ${num(scoreOf(top))} out of 100${top.reasons && top.reasons[0] ? ": " + esc(top.reasons[0].toLowerCase()) : ""}.`);
+  if (solar && prospects.length) {
+    const comm = prospects.filter(p => ["commercial", "industrial", "retail", "office", "warehouse"].includes(String(p.building_type || "").toLowerCase())).length;
+    why.push(`${comm} of the top ${prospects.length} are tagged commercial or industrial in map data.`);
+  }
+  if (top && isNum(top.evidence_coverage)) why.push(`Scores use measured evidence covering ${Math.round(top.evidence_coverage * 100)}% of the criteria weight; the rest is listed as missing below.`);
   $("decision").innerHTML = `<div>
-      <h2>${isNum(total) ? `Found ${num(total)} candidate building${+total === 1 ? "" : "s"}` : esc(dec.summary || "Analysis complete")}</h2>
-      <div>${isNum(total) && +total > 0 ? `Top ${num(short)} have been ranked for solar prospecting.` : "No buildings matched the requested minimum area."}</div>
+      <h2>${isNum(total) && +total > 0 ? `Found ${num(total)} candidate ${esc(noun)}${+total === 1 ? "" : "s"}` : esc(dec.summary || "Analysis complete")}</h2>
+      <div>${isNum(total) && +total > 0 ? `Top ${num(short)} have been ranked for ${esc(uc.purpose || "solar prospecting")}.` : ""}</div>
       ${why.length ? `<ul class="why">${why.map(w => `<li>${w}</li>`).join("")}</ul>` : ""}</div>
     <div><div class="muted sm">Confidence</div><span class="badge ${conf}">${esc(cap(conf))}</span>
       <div class="action"><div class="muted sm">Recommended action</div>${esc(dec.recommended_action || "Not available")}</div></div>`;
@@ -219,7 +235,7 @@ function render(d) {
     <div><div class="kv"><span>Satellite ID</span><div style="word-break:break-all">${esc(sat && sat.id || "Not available")}</div>
     <span>Captured</span><div>${fmtDate(sat && sat.date)}</div>
     <span>Cloud cover</span><div>${isNum(sat && sat.cloud_cover) ? num(sat.cloud_cover, 1) + "%" : "Not available"}</div></div>
-    <p class="sm muted">Context imagery only. It does not confirm usable roof area.</p></div></div>`;
+    <p class="sm muted">Context imagery only. It does not confirm ${solar ? "usable roof area" : "site conditions"}.</p></div></div>`;
   if (img) {
     const im = new Image(); im.alt = "Latest satellite scene of the search area";
     im.onload = () => $("satimg").replaceChildren(im);
@@ -228,7 +244,11 @@ function render(d) {
   }
 
   const lims = Array.isArray(d.limitations) && d.limitations.length ? d.limitations : ["Building footprint is not equivalent to usable roof area.", "Solar suitability has not been verified from high-resolution imagery.", "Ownership, roof condition, structural suitability and shading require additional verification."];
-  $("limits").innerHTML = `<h2>What this analysis does not tell you</h2><ul>${lims.map(l => `<li>${esc(l)}</li>`).join("")}</ul>`;
+  const missing = Array.isArray(d.missing_data) ? d.missing_data : [];
+  const used = Array.isArray(d.evidence) ? d.evidence : [];
+  $("limits").innerHTML = `<h2>What this analysis does not tell you</h2><ul>${lims.map(l => `<li>${esc(l)}</li>`).join("")}</ul>
+    ${missing.length ? `<p class="sm"><b>Not assessed (no data):</b> ${missing.map(m => esc(cap(m))).join(", ")}</p>` : ""}
+    ${used.length ? `<p class="sm muted">Data layers: ${used.map(e => `${esc(e.label)} (${esc(e.status.replace(/_/g, " "))})`).join("; ")}</p>` : ""}`;
 
   $("result").hidden = false;
   draw(loc, radius);
@@ -237,14 +257,40 @@ function render(d) {
 
 function reasonsHtml(p) { return Array.isArray(p.reasons) && p.reasons.length ? `<ul>${p.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : "<div class='sm muted'>No reasons returned.</div>"; }
 function coords(p) { return isNum(p.latitude) && isNum(p.longitude) ? (+p.latitude).toFixed(5) + ", " + (+p.longitude).toFixed(5) : "Not available"; }
+function scoreOf(p) { return isNum(p.score) ? +p.score : p.solar_score; }
+function typeOf(p) { return p.site_type || p.building_type; }
+function criteriaHtml(p) {
+  const cs = p.criteria && typeof p.criteria === "object" ? Object.values(p.criteria) : [];
+  if (!cs.length) return "";
+  return `<details class="sm"><summary class="muted">Score breakdown</summary><ul>${cs.map(c => c.available
+    ? `<li>${esc(c.label)}: <b>${num(c.score)}</b> (weight ${num(c.weight * 100)}%)${c.evidence ? ` <span class="muted">- ${esc(c.evidence)}</span>` : ""}</li>`
+    : `<li class="muted">${esc(c.label)}: not measured (${esc(c.note || "no data")})</li>`).join("")}</ul></details>`;
+}
 function cardHtml(p, i) {
-  const c = String(p.confidence || "").toLowerCase(), s = isNum(p.solar_score) ? Math.max(0, Math.min(100, +p.solar_score)) : 0;
+  const sc = scoreOf(p), c = String(p.confidence || "").toLowerCase(), s = isNum(sc) ? Math.max(0, Math.min(100, +sc)) : 0;
   return `<article class="card" data-i="${i}" tabindex="0"><div class="hd"><span class="rank">#${i + 1}</span>
     <div><span class="badge ${c}">${esc(cap(c))} confidence</span>${p.name ? `<div class="sm">${esc(p.name)}</div>` : ""}</div>
-    <div class="score"><b>${isNum(p.solar_score) ? num(p.solar_score) : "-"}</b><br>Solar score</div></div>
+    <div class="score"><b>${isNum(sc) ? num(sc) : "-"}</b><br>${isNum(p.solar_score) ? "Solar score" : "Score"}</div></div>
     <div class="bar"><i style="width:${s}%"></i></div>
-    <div class="kv"><span>Footprint area</span><div>${num(p.area_m2)} m&sup2;</div><span>Building type</span><div>${esc(cap(p.building_type))}</div><span>Latitude / longitude</span><div>${coords(p)}</div></div>
-    <div class="sm muted">Why SkyLens ranked it</div>${reasonsHtml(p)}</article>`;
+    <div class="kv"><span>${p.site_type ? "Mapped area" : "Footprint area"}</span><div>${num(p.area_m2)} m&sup2;</div><span>${p.site_type ? "Site type" : "Building type"}</span><div>${esc(cap(typeOf(p)))}</div><span>Latitude / longitude</span><div>${coords(p)}</div>${isNum(p.evidence_coverage) ? `<span>Evidence coverage</span><div>${Math.round(p.evidence_coverage * 100)}%</div>` : ""}</div>
+    <div class="sm muted">Why SkyLens ranked it</div>${reasonsHtml(p)}${criteriaHtml(p)}</article>`;
+}
+
+function renderNoAnalysis(d) {
+  const spec = d.analysis_spec || {}, det = d.detected_requirements || {};
+  const unsupported = d.status === "unsupported_use_case";
+  steps(1, -1, -1, ["Request understood"]);
+  $("intro").hidden = false;
+  $("intro").innerHTML = `<div class="muted sm">Your question</div><q>${esc(d.query)}</q>
+    <div class="chips"><span class="chip"><b>${esc(cap(spec.intent_type))}</b></span>${spec.location ? `<span class="chip">${esc(spec.location)}</span>` : ""}</div>`;
+  const list = (t, xs) => Array.isArray(xs) && xs.length ? `<p class="sm"><b>${t}:</b> ${xs.map(x => esc(cap(x))).join(", ")}</p>` : "";
+  $("error").hidden = false;
+  $("error").innerHTML = `<h2>${unsupported ? "Understood, but not supported yet" : "Understood, but not implemented yet"}</h2>
+    <p>${esc(d.message)}</p>
+    ${list("Criteria SkyLens would need", det.criteria || spec.criteria)}
+    ${list("Data needed", det.data_needed || spec.data_needed)}
+    ${list("Missing data", d.missing_data)}
+    ${Array.isArray(d.supported_use_cases) ? `<p class="sm muted">Supported today: ${d.supported_use_cases.filter(u => u.implemented).map(u => esc(u.title)).join(", ")}</p>` : ""}`;
 }
 
 function draw(loc, radius) {
@@ -267,7 +313,7 @@ function draw(loc, radius) {
     if (!isNum(p.latitude) || !isNum(p.longitude)) { markers[i] = null; return; }
     const first = i === 0, size = first ? 40 : 30;
     const m = L.marker([+p.latitude, +p.longitude], {zIndexOffset: first ? 1000 : 0, icon: L.divIcon({className: "", html: `<div class="pin ${first ? "top" : ""}">${i + 1}</div>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2]})}).addTo(layer);
-    m.bindPopup(`<div class="pop"><b>#${i + 1} ${esc(p.name || cap(p.building_type) + " building")}</b><br>Solar score ${num(p.solar_score)} (${esc(cap(p.confidence).toLowerCase())} confidence)<br>Footprint ${num(p.area_m2)} m&sup2;<br>${coords(p)}${reasonsHtml(p)}</div>`);
+    m.bindPopup(`<div class="pop"><b>#${i + 1} ${esc(p.name || cap(typeOf(p)) + (p.site_type ? "" : " building"))}</b><br>${isNum(p.solar_score) ? "Solar score" : "Score"} ${num(scoreOf(p))} (${esc(cap(p.confidence).toLowerCase())} confidence)<br>${p.site_type ? "Area" : "Footprint"} ${num(p.area_m2)} m&sup2;<br>${coords(p)}${reasonsHtml(p)}</div>`);
     m.on("click", () => select(i, false));
     markers[i] = m; pts.push([+p.latitude, +p.longitude]);
   });

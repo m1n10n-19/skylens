@@ -21,19 +21,29 @@ from buildings import get_buildings
 
 from scoring import score_solar_candidate
 
+from planner import (
+    PLANNER_SYSTEM,
+    build_planner_prompt,
+    plan_from_llm_json
+)
+
+from pipeline import (
+    not_implemented_response,
+    run_analysis,
+    unsupported_response
+)
+
+from use_cases import (
+    USE_CASES,
+    describe_use_case
+)
+
 
 # ============================================================
 # ENVIRONMENT
 # ============================================================
 
-# .env is located at:
-#
-# D:\skylens\.env
-#
-# while this file is:
-#
-# D:\skylens\backend\main.py
-#
+# .env lives in the repository root, one level above backend/.
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(
@@ -72,6 +82,86 @@ client = OpenAI(
 )
 
 
+def call_deepseek_json(system, prompt):
+    """
+    Call DeepSeek and parse its reply as JSON.
+    Raises HTTPException with stage "deepseek" or "deepseek_json".
+    """
+
+    try:
+
+        response = client.chat.completions.create(
+
+            model="deepseek-chat",
+
+            messages=[
+                {
+                    "role": "system",
+                    "content": system
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+
+            temperature=0
+        )
+
+    except Exception as e:
+
+        print(
+            "DEEPSEEK ERROR:",
+            repr(e)
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "stage": "deepseek",
+                "error_type": type(e).__name__,
+                "error": str(e)
+            }
+        )
+
+
+    text = response.choices[0].message.content or ""
+
+    text = (
+        text
+        .replace("```json", "")
+        .replace("```", "")
+        .strip()
+    )
+
+
+    try:
+
+        return json.loads(text)
+
+    except json.JSONDecodeError:
+
+        print(
+            "DEEPSEEK RETURNED INVALID JSON:"
+        )
+
+        print(
+            text
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "stage": "deepseek_json",
+                "error": (
+                    "DeepSeek returned "
+                    "invalid JSON"
+                ),
+                "raw": text
+            }
+        )
+
+
 # ============================================================
 # FASTAPI
 # ============================================================
@@ -82,7 +172,7 @@ app = FastAPI(
         "Reality intelligence API for "
         "physical-world questions"
     ),
-    version="0.1.0"
+    version="0.2.0"
 )
 
 
@@ -207,74 +297,12 @@ Do not invent precise coordinates.
 Use null when uncertain.
 """
 
-    try:
-
-        response = client.chat.completions.create(
-
-            model="deepseek-chat",
-
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are the SkyLens "
-                        "intent engine. "
-                        "Return only valid JSON."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-
-            temperature=0
-        )
-
-    except Exception as e:
-
-        print(
-            "DEEPSEEK ERROR:",
-            repr(e)
-        )
-
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "stage": "deepseek",
-                "error_type": type(e).__name__,
-                "error": str(e)
-            }
-        )
-
-
-    text = response.choices[0].message.content
-
-    text = (
-        text
-        .replace("```json", "")
-        .replace("```", "")
-        .strip()
+    result = call_deepseek_json(
+        "You are the SkyLens "
+        "intent engine. "
+        "Return only valid JSON.",
+        prompt
     )
-
-
-    try:
-
-        result = json.loads(text)
-
-    except json.JSONDecodeError:
-
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "stage": "deepseek_json",
-                "error": (
-                    "DeepSeek returned "
-                    "invalid JSON"
-                ),
-                "raw": text
-            }
-        )
 
 
     print(
@@ -661,127 +689,92 @@ def solar_prospects(
 
 
 # ============================================================
-# LOCATION TEXT EXTRACTION (used by /analyze)
+# ANALYSIS PLANNER
 # ============================================================
 
-# DeepSeek may return "location" either as a plain string:
-#
-#   "location": "Adyar, Chennai"
-#
-# or as an object:
-#
-#   "location": {"text": "Adyar, Chennai", "coordinates": null}
-#
-# Only the TEXT is used. Any coordinates DeepSeek returns are
-# ignored; coordinates always come from Nominatim.
+def plan_analysis(query):
+    """
+    STEP 1: DeepSeek turns the query into an AnalysisSpec and
+    SkyLens picks the matching use case from the registry.
+    """
 
-_LOCATION_TEXT_KEYS = (
-    "text",
-    "name",
-    "query",
-    "address",
-    "location",
-    "display_name"
-)
-
-# Joined in this order, e.g. area + city + country
-# -> "Adyar, Chennai, India"
-
-_LOCATION_PART_KEYS = (
-    "street",
-    "area",
-    "neighborhood",
-    "neighbourhood",
-    "locality",
-    "suburb",
-    "district",
-    "city",
-    "county",
-    "state",
-    "country"
-)
-
-
-def extract_location_text(intent):
-
-    raw = intent.get(
-        "location"
+    print(
+        "\nSTEP 1: Calling DeepSeek planner..."
     )
 
-    text = None
+    intent = call_deepseek_json(
+        PLANNER_SYSTEM,
+        build_planner_prompt(query)
+    )
 
-
-    if isinstance(raw, str):
-
-        text = raw
-
-    elif isinstance(raw, dict):
-
-        # Shape 1: {"text": "Adyar, Chennai", ...}
-
-        for key in _LOCATION_TEXT_KEYS:
-
-            value = raw.get(key)
-
-            if isinstance(value, str) and value.strip():
-
-                text = value
-
-                break
-
-
-        # Shape 2: {"area": "Adyar", "city": "Chennai", ...}
-
-        if not text:
-
-            parts = []
-
-            for key in _LOCATION_PART_KEYS:
-
-                value = raw.get(key)
-
-                if isinstance(value, str) and value.strip():
-
-                    value = value.strip()
-
-                    if value not in parts:
-
-                        parts.append(value)
-
-            if parts:
-
-                text = ", ".join(parts)
-
-
-    if isinstance(text, str):
-
-        text = text.strip()
-
-
-    if not text:
+    if not isinstance(intent, dict):
 
         raise HTTPException(
-
-            status_code=400,
-
+            status_code=502,
             detail={
-
-                "stage":
-                    "location_extraction",
-
-                "error":
-                    (
-                        "DeepSeek did not return "
-                        "usable location text."
-                    ),
-
-                "raw_location":
-                    raw
+                "stage": "deepseek_json",
+                "error": "DeepSeek did not return a JSON object",
+                "raw": intent
             }
         )
 
+    spec, use_case = plan_from_llm_json(
+        intent,
+        query
+    )
 
-    return text
+    print(
+        "STEP 1 COMPLETE"
+    )
+
+    print(
+        "AnalysisSpec:",
+        spec.model_dump()
+    )
+
+    print(
+        "Use case:",
+        use_case.id if use_case else "UNSUPPORTED"
+    )
+
+    return intent, spec, use_case
+
+
+@app.get("/use-cases")
+def use_cases():
+
+    return {
+        "use_cases": [
+            describe_use_case(use_case)
+            for use_case in USE_CASES.values()
+        ]
+    }
+
+
+@app.post("/plan")
+def plan(
+    request: IntentRequest
+):
+    """
+    Show the AnalysisSpec for a query without collecting data.
+    """
+
+    intent, spec, use_case = plan_analysis(
+        request.query
+    )
+
+    return {
+        "query": request.query,
+        "intent": intent,
+        "analysis_spec": spec.model_dump(),
+        "use_case": (
+            describe_use_case(use_case)
+            if use_case else None
+        ),
+        "supported": bool(
+            use_case and use_case.implemented
+        )
+    }
 
 
 # ============================================================
@@ -811,735 +804,36 @@ def analyze(
         "========================================"
     )
 
-
-    # ========================================================
-    # STEP 1 — DEEPSEEK INTENT
-    # ========================================================
-
-    print(
-        "\nSTEP 1: Calling DeepSeek..."
+    intent, spec, use_case = plan_analysis(
+        request.query
     )
 
+    if use_case is None:
 
-    prompt = f"""
-You are the intent engine for SkyLens.
-
-SkyLens analyzes physical places,
-buildings, land, infrastructure and
-changes over time.
-
-Convert this customer request into
-structured JSON.
-
-Customer request:
-
-{request.query}
-
-Return ONLY valid JSON.
-
-Required fields:
-
-intent_type
-location
-industry
-requirements
-data_needed
-output
-
-Important:
-
-The location field must be a single
-plain-text string that can be searched
-on a map, for example:
-"Adyar, Chennai, Tamil Nadu, India".
-Do not return location as an object.
-
-Do not invent precise coordinates.
-
-If a value is uncertain,
-use null.
-
-For requirements, preserve
-specific numbers from the
-customer request.
-"""
-
-
-    try:
-
-        response = client.chat.completions.create(
-
-            model="deepseek-chat",
-
-            messages=[
-
-                {
-                    "role": "system",
-
-                    "content": (
-                        "You are the SkyLens "
-                        "intent engine. "
-                        "Return only valid JSON."
-                    )
-                },
-
-                {
-                    "role": "user",
-
-                    "content": prompt
-                }
-
-            ],
-
-            temperature=0
+        result = unsupported_response(
+            request.query,
+            intent,
+            spec
         )
 
-
-    except Exception as e:
-
-        print(
-            "\nDEEPSEEK FAILED"
-        )
-
-        print(
-            repr(e)
-        )
-
-        raise HTTPException(
-
-            status_code=502,
-
-            detail={
-
-                "stage":
-                    "deepseek",
-
-                "error_type":
-                    type(e).__name__,
-
-                "error":
-                    str(e)
-            }
-        )
-
-
-    print(
-        "STEP 1: DeepSeek response received."
-    )
-
-
-    text = response.choices[0].message.content
-
-
-    text = (
-        text
-        .replace("```json", "")
-        .replace("```", "")
-        .strip()
-    )
-
-
-    try:
-
-        intent = json.loads(
-            text
-        )
-
-    except json.JSONDecodeError:
-
-        print(
-            "DEEPSEEK RETURNED INVALID JSON:"
-        )
-
-        print(
-            text
-        )
-
-        raise HTTPException(
-
-            status_code=502,
-
-            detail={
-
-                "stage":
-                    "deepseek_json",
-
-                "error":
-                    "Invalid JSON",
-
-                "raw":
-                    text
-            }
-        )
-
-
-    print(
-        "STEP 1 COMPLETE"
-    )
-
-    print(
-        "Intent:",
-        intent
-    )
-
-
-    # ========================================================
-    # STEP 2 — GEOCODING (Nominatim only)
-    # ========================================================
-
-    location_name = extract_location_text(
-        intent
-    )
-
-
-    print(
-        "\nSTEP 2: Geocoding:",
-        repr(location_name)
-    )
-
-
-    try:
-
-        location_result = (
-            geolocator.geocode(
-                location_name
-            )
-        )
-
-
-    except Exception as e:
-
-        print(
-            "\nGEOCODING FAILED"
-        )
-
-        print(
-            repr(e)
-        )
-
-        raise HTTPException(
-
-            status_code=502,
-
-            detail={
-
-                "stage":
-                    "geocoding",
-
-                "location_text":
-                    location_name,
-
-                "error_type":
-                    type(e).__name__,
-
-                "error":
-                    str(e)
-            }
-        )
-
-
-    if not location_result:
-
-        raise HTTPException(
-
-            status_code=404,
-
-            detail={
-
-                "stage":
-                    "geocoding",
-
-                "location_text":
-                    location_name,
-
-                "error":
-                    f"Location not found: {location_name}"
-            }
-        )
-
-
-    latitude = (
-        location_result.latitude
-    )
-
-    longitude = (
-        location_result.longitude
-    )
-
-
-    print(
-        "STEP 2 COMPLETE"
-    )
-
-    print(
-        "Coordinates (Nominatim):",
-        latitude,
-        longitude
-    )
-
-
-    # ========================================================
-    # STEP 3 — SEARCH RADIUS
-    # ========================================================
-
-    radius_km = intent.get(
-        "radius_km",
-        1
-    )
-
-
-    if not radius_km:
-
-        radius_km = 1
-
-
-    try:
-
-        radius_km = float(
-            radius_km
-        )
-
-    except (
-        TypeError,
-        ValueError
-    ):
-
-        radius_km = 1
-
-
-    # MVP safety limit
-
-    radius_km = min(
-        radius_km,
-        2
-    )
-
-
-    print(
-        "\nSTEP 3: Search radius:",
-        radius_km,
-        "km"
-    )
-
-
-    # ========================================================
-    # STEP 4 — SATELLITE
-    # ========================================================
-
-    print(
-        "STEP 4: Getting satellite imagery..."
-    )
-
-
-    try:
-
-        satellite = (
-            get_latest_satellite(
-
-                latitude=latitude,
-
-                longitude=longitude,
-
-                radius_km=radius_km
-            )
-        )
-
-
-    except Exception as e:
-
-        print(
-            "\nSATELLITE FAILED"
-        )
-
-        print(
-            repr(e)
-        )
-
-        raise HTTPException(
-
-            status_code=502,
-
-            detail={
-
-                "stage":
-                    "satellite",
-
-                "error_type":
-                    type(e).__name__,
-
-                "error":
-                    str(e)
-            }
-        )
-
-
-    if not satellite:
-
-        raise HTTPException(
-
-            status_code=404,
-
-            detail={
-
-                "stage":
-                    "satellite",
-
-                "error":
-                    "No suitable satellite imagery found."
-            }
-        )
-
-
-    print(
-        "STEP 4 COMPLETE"
-    )
-
-    print(
-        "Satellite:",
-        satellite["id"]
-    )
-
-
-    # ========================================================
-    # STEP 5 — BUILDING DATA
-    # ========================================================
-
-    print(
-        "\nSTEP 5: Getting building footprints..."
-    )
-
-
-    requirements = (
-        intent.get(
-            "requirements"
-        )
-        or {}
-    )
-
-
-    if not isinstance(requirements, dict):
-
-        requirements = {}
-
-
-    minimum_area = (
-        requirements.get(
-            "minimum_roof_area_m2"
-        )
-    )
-
-
-    if minimum_area is None:
-
-        minimum_area = (
-            requirements.get(
-                "minimum_area_m2"
-            )
-        )
-
-
-    if minimum_area is None:
-
-        # DeepSeek's key names vary, e.g.
-        # "min_usable_roof_area_sqm"
-
-        for key, value in requirements.items():
-
-            if (
-                "area" in str(key).lower()
-                and isinstance(value, (int, float))
-                and not isinstance(value, bool)
-            ):
-
-                minimum_area = value
-
-                break
-
-
-    if minimum_area is None:
-
-        minimum_area = 500
-
-
-    try:
-
-        minimum_area = float(
-            minimum_area
-        )
-
-    except (
-        TypeError,
-        ValueError
-    ):
-
-        minimum_area = 500
-
-
-    print(
-        "Minimum area:",
-        minimum_area
-    )
-
-
-    try:
-
-        buildings = get_buildings(
-
-            latitude=latitude,
-
-            longitude=longitude,
-
-            radius_km=radius_km,
-
-            minimum_area_m2=minimum_area
-        )
-
-
-    except Exception as e:
-
-        print(
-            "\nBUILDING DATA FAILED"
-        )
-
-        print(
-            repr(e)
-        )
-
-        raise HTTPException(
-
-            status_code=502,
-
-            detail={
-
-                "stage":
-                    "building_data",
-
-                "error_type":
-                    type(e).__name__,
-
-                "error":
-                    str(e)
-            }
-        )
-
-
-    print(
-        "STEP 5 COMPLETE"
-    )
-
-    print(
-        "Buildings found:",
-        len(buildings)
-    )
-
-
-    # ========================================================
-    # STEP 6 — SCORE
-    # ========================================================
-
-    print(
-        "\nSTEP 6: Scoring candidates..."
-    )
-
-
-    try:
-
-        scored = [
-
-            score_solar_candidate(
-                building
-            )
-
-            for building
-            in buildings
-        ]
-
-
-        scored.sort(
-
-            key=lambda x: (
-
-                x["solar_score"],
-
-                x["area_m2"]
-
-            ),
-
-            reverse=True
-        )
-
-
-    except Exception as e:
-
-        print(
-            "\nSCORING FAILED"
-        )
-
-        print(
-            repr(e)
-        )
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail={
-
-                "stage":
-                    "scoring",
-
-                "error_type":
-                    type(e).__name__,
-
-                "error":
-                    str(e)
-            }
-        )
-
-
-    top_prospects = (
-        scored[:10]
-    )
-
-
-    print(
-        "STEP 6 COMPLETE"
-    )
-
-    print(
-        "Top prospects:",
-        len(top_prospects)
-    )
-
-
-    # ========================================================
-    # STEP 7 — FINAL DECISION
-    # ========================================================
-
-    print(
-        "\nSTEP 7: Creating final decision..."
-    )
-
-
-    if len(scored) == 0:
-
-        summary = (
-            "No buildings matched "
-            "the requested minimum area."
+    elif not use_case.implemented:
+
+        result = not_implemented_response(
+            request.query,
+            intent,
+            spec,
+            use_case
         )
 
     else:
 
-        summary = (
-            f"Found {len(scored)} "
-            f"candidate buildings. "
-            f"The top {len(top_prospects)} "
-            f"have been ranked for "
-            f"solar prospecting."
-        )
-
-
-    decision = {
-
-        "summary":
-            summary,
-
-        "recommended_action":
-            (
-                "Prioritize the highest-scoring "
-                "sites for roof-level verification."
-            ),
-
-        "confidence":
-            (
-                "medium"
-                if len(scored) > 0
-                else "low"
-            )
-    }
-
-
-    print(
-        "STEP 7 COMPLETE"
-    )
-
-
-    # ========================================================
-    # FINAL RESPONSE
-    # ========================================================
-
-    result = {
-
-        "status":
-            "success",
-
-        "query":
+        result = run_analysis(
             request.query,
-
-        "intent":
             intent,
-
-        "resolved_location": {
-
-            "name":
-                location_result.address,
-
-            "latitude":
-                latitude,
-
-            "longitude":
-                longitude
-        },
-
-        "search_area": {
-
-            "radius_km":
-                radius_km
-        },
-
-        "satellite":
-            satellite,
-
-        "analysis": {
-
-            "total_candidates":
-                len(scored),
-
-            "shortlisted":
-                len(top_prospects),
-
-            "minimum_area_m2":
-                minimum_area
-        },
-
-        "top_prospects":
-            top_prospects,
-
-        "decision":
-            decision,
-
-        "limitations": [
-
-            (
-                "Building footprint is not "
-                "equivalent to usable roof area."
-            ),
-
-            (
-                "Solar suitability has not "
-                "been verified from "
-                "high-resolution imagery."
-            ),
-
-            (
-                "Ownership, roof condition, "
-                "structural suitability and "
-                "shading require additional "
-                "verification."
-            )
-        ]
-    }
-
+            spec,
+            use_case,
+            geolocator
+        )
 
     print(
         "\n"
@@ -1547,12 +841,12 @@ customer request.
     )
 
     print(
-        "SKYLENS ANALYSIS COMPLETE"
+        "SKYLENS ANALYSIS COMPLETE:",
+        result["status"]
     )
 
     print(
         "========================================\n"
     )
-
 
     return result

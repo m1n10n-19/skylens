@@ -1,10 +1,48 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-import planetary_computer
 import pystac_client
+
+from geodata import bbox_around
 
 
 CATALOG_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
+
+
+def _search_items(latitude, longitude, radius_km, days_back):
+    """
+    Sentinel-2 scenes under 20% cloud cover from the last
+    days_back days that overlap the search area.
+    """
+
+    catalog = pystac_client.Client.open(CATALOG_URL)
+
+    end = datetime.now(timezone.utc)
+
+    start = end - timedelta(days=days_back)
+
+    south, west, north, east = bbox_around(latitude, longitude, radius_km)
+
+    search = catalog.search(
+        collections=["sentinel-2-l2a"],
+        bbox=[west, south, east, north],
+        datetime=(
+            f"{start:%Y-%m-%dT%H:%M:%SZ}/{end:%Y-%m-%dT%H:%M:%SZ}"
+        ),
+        query={"eo:cloud_cover": {"lt": 20}},
+        max_items=10,
+    )
+
+    return list(search.items())
+
+
+def _summary(item):
+
+    return {
+        "id": item.id,
+        "date": item.datetime.isoformat() if item.datetime else None,
+        "cloud_cover": item.properties.get("eo:cloud_cover"),
+        "bbox": item.bbox,
+    }
 
 
 def search_satellite(
@@ -14,62 +52,14 @@ def search_satellite(
     days_back: int = 90,
 ):
     """
-    Find recent Sentinel-2 imagery around a location.
+    Recent Sentinel-2 scenes around a location.
     """
 
-    catalog = pystac_client.Client.open(
-        CATALOG_URL
-    )
-
-    end_date = datetime.utcnow()
-    start_date = end_date - timedelta(days=days_back)
-
-    # Approximate bounding box.
-    # Good enough for the MVP.
-    lat_delta = radius_km / 111
-    lon_delta = radius_km / (
-        111 * max(abs(__import__("math").cos(
-            __import__("math").radians(latitude)
-        )), 0.1)
-    )
-
-    bbox = [
-        longitude - lon_delta,
-        latitude - lat_delta,
-        longitude + lon_delta,
-        latitude + lat_delta,
+    return [
+        {**_summary(item), "assets": list(item.assets.keys())}
+        for item in _search_items(latitude, longitude, radius_km, days_back)
     ]
 
-    search = catalog.search(
-        collections=["sentinel-2-l2a"],
-        bbox=bbox,
-        datetime=f"{start_date.isoformat()}Z/{end_date.isoformat()}Z",
-        query={
-            "eo:cloud_cover": {
-                "lt": 20
-            }
-        },
-        max_items=10,
-    )
-
-    items = list(search.items())
-
-    results = []
-
-    for item in items:
-
-        results.append({
-            "id": item.id,
-            "date": item.datetime.isoformat()
-            if item.datetime else None,
-            "cloud_cover": item.properties.get(
-                "eo:cloud_cover"
-            ),
-            "bbox": item.bbox,
-            "assets": list(item.assets.keys()),
-        })
-
-    return results
 
 def get_latest_satellite(
     latitude: float,
@@ -77,60 +67,21 @@ def get_latest_satellite(
     radius_km: float = 5,
     days_back: int = 90,
 ):
-    catalog = pystac_client.Client.open(
-        CATALOG_URL
-    )
+    """
+    The clearest (lowest cloud cover) recent scene, or None.
+    """
 
-    end_date = datetime.utcnow()
-    start_date = end_date - timedelta(days=days_back)
-
-    import math
-
-    lat_delta = radius_km / 111
-    lon_delta = radius_km / (
-        111 * max(abs(math.cos(math.radians(latitude))), 0.1)
-    )
-
-    bbox = [
-        longitude - lon_delta,
-        latitude - lat_delta,
-        longitude + lon_delta,
-        latitude + lat_delta,
-    ]
-
-    search = catalog.search(
-        collections=["sentinel-2-l2a"],
-        bbox=bbox,
-        datetime=f"{start_date.isoformat()}Z/{end_date.isoformat()}Z",
-        query={
-            "eo:cloud_cover": {
-                "lt": 20
-            }
-        },
-        max_items=10,
-    )
-
-    items = list(search.items())
+    items = _search_items(latitude, longitude, radius_km, days_back)
 
     if not items:
         return None
 
-    # Lowest cloud cover first
-    items.sort(
-        key=lambda item: item.properties.get(
-            "eo:cloud_cover", 100
-        )
+    item = min(
+        items,
+        key=lambda i: i.properties.get("eo:cloud_cover", 100),
     )
 
-    item = items[0]
-
     return {
-        "id": item.id,
-        "date": item.datetime.isoformat()
-        if item.datetime else None,
-        "cloud_cover": item.properties.get(
-            "eo:cloud_cover"
-        ),
+        **_summary(item),
         "visual_url": item.assets["visual"].href,
-        "bbox": item.bbox,
     }

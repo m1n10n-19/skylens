@@ -1,0 +1,922 @@
+"""
+SkyLens use-case registry.
+
+Each use case is a "playbook": what kind of physical thing is
+evaluated, which data layers are needed, which criteria matter,
+how they are weighted, and what the output looks like.
+
+DeepSeek picks the use case (via the AnalysisSpec). Everything in
+this file is deterministic configuration that SkyLens executes.
+
+To add a use case: add a UseCase entry to USE_CASES. If it needs a
+new measurement, add an evaluator in criteria.py and reference it by
+name from a Criterion.
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+# ============================================================
+# DATA LAYERS
+# ============================================================
+
+# "available" means SkyLens has a working provider today.
+# Unavailable layers are listed so that criteria depending on them
+# are reported as missing evidence instead of being fabricated.
+
+DATA_LAYERS = {
+
+    "satellite_imagery": {
+        "label": "Satellite imagery (Sentinel-2, 10 m)",
+        "source": "Microsoft Planetary Computer",
+        "available": True,
+    },
+
+    "building_footprints": {
+        "label": "Building footprints",
+        "source": "OpenStreetMap (Overpass)",
+        "available": True,
+    },
+
+    "land_parcels": {
+        "label": "Open / vacant land polygons",
+        "source": "OpenStreetMap land-use tags (not cadastral parcels)",
+        "available": True,
+    },
+
+    "roads": {
+        "label": "Road network",
+        "source": "OpenStreetMap (Overpass)",
+        "available": True,
+    },
+
+    "points_of_interest": {
+        "label": "Shops, offices and amenities",
+        "source": "OpenStreetMap (Overpass)",
+        "available": True,
+    },
+
+    "ev_chargers": {
+        "label": "Existing EV charging stations",
+        "source": "OpenStreetMap (Overpass)",
+        "available": True,
+    },
+
+    "parking": {
+        "label": "Mapped parking areas",
+        "source": "OpenStreetMap (Overpass)",
+        "available": True,
+    },
+
+    "flood_risk": {
+        "label": "Flood risk",
+        "source": None,
+        "available": False,
+    },
+
+    "population": {
+        "label": "Population / footfall",
+        "source": None,
+        "available": False,
+    },
+
+    "zoning": {
+        "label": "Zoning / permitted land use",
+        "source": None,
+        "available": False,
+    },
+
+    "ownership": {
+        "label": "Ownership / title records",
+        "source": None,
+        "available": False,
+    },
+
+    "solar_irradiance": {
+        "label": "Rooftop solar irradiance",
+        "source": None,
+        "available": False,
+    },
+
+    "shading": {
+        "label": "Roof shading analysis",
+        "source": None,
+        "available": False,
+    },
+
+    "historical_imagery": {
+        "label": "Historical imagery comparison",
+        "source": None,
+        "available": False,
+    },
+
+    "site_registry": {
+        "label": "Customer's registered sites",
+        "source": None,
+        "available": False,
+    },
+}
+
+
+# ============================================================
+# MODELS
+# ============================================================
+
+@dataclass(frozen=True)
+class Criterion:
+
+    id: str
+
+    label: str
+
+    weight: float
+
+    # Data layer that supplies the evidence.
+    data_layer: str
+
+    # Name of the evaluator in criteria.EVALUATORS.
+    # None means SkyLens does not measure this yet.
+    evaluator: Optional[str] = None
+
+    # Shown when the criterion cannot be measured.
+    missing_note: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class UseCase:
+
+    id: str
+
+    title: str
+
+    # Used in the DeepSeek planner prompt.
+    description: str
+
+    example_queries: tuple
+
+    candidate_type: str
+
+    # Singular noun used in summaries, e.g. "building".
+    candidate_noun: str
+
+    # How candidates are generated: "buildings", "land_parcels",
+    # "sites" or None (not implemented).
+    candidate_source: Optional[str]
+
+    data_layers: tuple
+
+    criteria: tuple
+
+    constraints: tuple = ()
+
+    # Things that matter for the decision but that SkyLens never
+    # assesses (not weighted, always reported as missing).
+    unassessed: tuple = ()
+
+    # Name of the scoring function in scoring.SCORERS.
+    scorer: str = "weighted_criteria"
+
+    # Candidates smaller than this are dropped when the user gave
+    # no size. When the user gave a target size, candidates below
+    # target * target_tolerance are dropped instead.
+    default_min_area_m2: float = 0
+
+    target_tolerance: float = 0.5
+
+    output_format: str = "ranked_candidates"
+
+    # Phrase used in summaries ("ranked for <purpose>");
+    # defaults to the lower-cased title.
+    purpose: Optional[str] = None
+
+    recommended_action: str = ""
+
+    limitations: tuple = ()
+
+    implemented: bool = True
+
+    aliases: tuple = ()
+
+
+# ============================================================
+# USE CASES
+# ============================================================
+
+SOLAR_PROSPECTING = UseCase(
+
+    id="solar_prospecting",
+
+    title="Solar prospecting",
+
+    description=(
+        "Find rooftops (buildings) that could host solar panels."
+    ),
+
+    example_queries=(
+        "Find large roofs around Adyar Chennai suitable for solar",
+    ),
+
+    candidate_type="building",
+
+    candidate_noun="building",
+
+    candidate_source="buildings",
+
+    data_layers=(
+        "satellite_imagery",
+        "building_footprints",
+    ),
+
+    # footprint_size : building_type = 0.7 : 0.3, which reproduces
+    # the legacy score_solar_candidate() points exactly (size and
+    # large-site bonus max 70, building type max 30).
+    criteria=(
+
+        Criterion(
+            id="footprint_size",
+            label="Building footprint size",
+            weight=0.35,
+            data_layer="building_footprints",
+            evaluator="solar_footprint_size",
+        ),
+
+        Criterion(
+            id="building_type",
+            label="Building type",
+            weight=0.15,
+            data_layer="building_footprints",
+            evaluator="solar_building_type",
+        ),
+
+        Criterion(
+            id="solar_suitability",
+            label="Solar irradiance / roof suitability",
+            weight=0.20,
+            data_layer="solar_irradiance",
+            missing_note="No rooftop irradiance data connected.",
+        ),
+
+        Criterion(
+            id="shading",
+            label="Shading",
+            weight=0.15,
+            data_layer="shading",
+            missing_note="No shading analysis connected.",
+        ),
+
+        Criterion(
+            id="accessibility",
+            label="Site accessibility",
+            weight=0.15,
+            data_layer="roads",
+            missing_note=(
+                "Not yet measured for solar prospects."
+            ),
+        ),
+    ),
+
+    constraints=(
+        "Building footprint is used as a proxy for roof area.",
+    ),
+
+    unassessed=(
+        "roof_condition",
+        "ownership",
+    ),
+
+    default_min_area_m2=500,
+
+    output_format="ranked_solar_prospects",
+
+    recommended_action=(
+        "Prioritize the highest-scoring "
+        "sites for roof-level verification."
+    ),
+
+    limitations=(
+        "Building footprint is not "
+        "equivalent to usable roof area.",
+
+        "Solar suitability has not "
+        "been verified from "
+        "high-resolution imagery.",
+
+        "Ownership, roof condition, "
+        "structural suitability and "
+        "shading require additional "
+        "verification.",
+    ),
+
+    aliases=(
+        "solar",
+        "rooftop_solar",
+        "solar_site_selection",
+    ),
+)
+
+
+EV_CHARGING = UseCase(
+
+    id="ev_charging_site_selection",
+
+    title="EV charging site selection",
+
+    description=(
+        "Find land or sites for an electric-vehicle charging "
+        "station: accessible, near demand, not over-served."
+    ),
+
+    example_queries=(
+        "Find 10 cent empty land parcels in Thoraipakkam Chennai "
+        "for an EV charging station",
+        "Where should I put my next EV charger?",
+    ),
+
+    candidate_type="land_parcel",
+
+    candidate_noun="land parcel",
+
+    candidate_source="land_parcels",
+
+    data_layers=(
+        "satellite_imagery",
+        "land_parcels",
+        "roads",
+        "points_of_interest",
+        "ev_chargers",
+        "flood_risk",
+    ),
+
+    criteria=(
+
+        Criterion(
+            id="parcel_size_fit",
+            label="Parcel size fit",
+            weight=0.20,
+            data_layer="land_parcels",
+            evaluator="size_fit",
+        ),
+
+        Criterion(
+            id="road_access",
+            label="Road access",
+            weight=0.15,
+            data_layer="roads",
+            evaluator="road_access",
+        ),
+
+        Criterion(
+            id="vacancy",
+            label="Vacancy evidence",
+            weight=0.10,
+            data_layer="land_parcels",
+            evaluator="vacancy_evidence",
+        ),
+
+        Criterion(
+            id="major_road_proximity",
+            label="Proximity to major roads",
+            weight=0.05,
+            data_layer="roads",
+            evaluator="major_road_proximity",
+        ),
+
+        Criterion(
+            id="demand_potential",
+            label="Demand potential (dwell-time destinations)",
+            weight=0.15,
+            data_layer="points_of_interest",
+            evaluator="demand_potential",
+        ),
+
+        Criterion(
+            id="commercial_activity",
+            label="Commercial activity",
+            weight=0.05,
+            data_layer="points_of_interest",
+            evaluator="commercial_activity",
+        ),
+
+        Criterion(
+            id="competition",
+            label="Competition (existing chargers)",
+            weight=0.15,
+            data_layer="ev_chargers",
+            evaluator="ev_competition",
+        ),
+
+        Criterion(
+            id="flood_risk",
+            label="Flood risk",
+            weight=0.15,
+            data_layer="flood_risk",
+            missing_note="No flood-risk data connected.",
+        ),
+    ),
+
+    constraints=(
+        "Site should be vacant land.",
+        "Vehicle access from a public road.",
+    ),
+
+    unassessed=(
+        "ownership",
+        "grid_connection_capacity",
+        "zoning",
+    ),
+
+    default_min_area_m2=150,
+
+    output_format="ranked_ev_charging_sites",
+
+    purpose="an EV charging station",
+
+    recommended_action=(
+        "Verify vacancy and grid-connection capacity at the "
+        "top-ranked parcels, then check ownership."
+    ),
+
+    limitations=(
+        "Land polygons come from OpenStreetMap land-use tags; "
+        "they are not legal/cadastral parcels.",
+
+        "Vacancy is inferred from map tags and has not been "
+        "verified on imagery.",
+
+        "Existing chargers are taken from OpenStreetMap, which "
+        "may not list every station.",
+
+        "Demand is estimated from nearby mapped destinations, not "
+        "from traffic counts or EV registrations.",
+
+        "Flood risk, ownership, zoning and grid capacity "
+        "have not been assessed.",
+    ),
+
+    aliases=(
+        "ev_charging",
+        "ev_charger_site_selection",
+        "ev_charging_station_site_selection",
+        "charging_station_site_selection",
+    ),
+)
+
+
+COMMERCIAL_SITE_SELECTION = UseCase(
+
+    id="commercial_site_selection",
+
+    title="Commercial site selection",
+
+    description=(
+        "Find a site for a business (shop, restaurant, food "
+        "court, showroom, office, clinic, gym...)."
+    ),
+
+    example_queries=(
+        "Find 4800 sq ft sites around Adyar Chennai suitable "
+        "for a food court",
+        "Where should I build a food court?",
+    ),
+
+    candidate_type="site",
+
+    candidate_noun="site",
+
+    candidate_source="sites",
+
+    data_layers=(
+        "satellite_imagery",
+        "land_parcels",
+        "building_footprints",
+        "roads",
+        "points_of_interest",
+        "parking",
+        "population",
+    ),
+
+    criteria=(
+
+        Criterion(
+            id="site_size_fit",
+            label="Site size fit",
+            weight=0.20,
+            data_layer="land_parcels",
+            evaluator="size_fit",
+        ),
+
+        Criterion(
+            id="road_access",
+            label="Road access",
+            weight=0.15,
+            data_layer="roads",
+            evaluator="road_access",
+        ),
+
+        Criterion(
+            id="major_road_proximity",
+            label="Proximity to major roads",
+            weight=0.10,
+            data_layer="roads",
+            evaluator="major_road_proximity",
+        ),
+
+        Criterion(
+            id="commercial_activity",
+            label="Surrounding commercial activity",
+            weight=0.20,
+            data_layer="points_of_interest",
+            evaluator="commercial_activity",
+        ),
+
+        Criterion(
+            id="parking_potential",
+            label="Parking potential",
+            weight=0.10,
+            data_layer="parking",
+            evaluator="parking_potential",
+        ),
+
+        Criterion(
+            id="competition",
+            label="Competition (similar businesses nearby)",
+            weight=0.10,
+            data_layer="points_of_interest",
+            evaluator="business_competition",
+        ),
+
+        Criterion(
+            id="population",
+            label="Surrounding population / footfall",
+            weight=0.15,
+            data_layer="population",
+            missing_note="No population or footfall data connected.",
+        ),
+    ),
+
+    constraints=(
+        "Site must fit the requested floor/land area.",
+    ),
+
+    unassessed=(
+        "ownership",
+        "rent_or_price",
+        "zoning",
+    ),
+
+    default_min_area_m2=150,
+
+    output_format="ranked_commercial_sites",
+
+    recommended_action=(
+        "Visit the top-ranked sites to confirm availability, "
+        "frontage and parking before approaching owners."
+    ),
+
+    limitations=(
+        "Sites are open-land polygons and commercial buildings "
+        "from OpenStreetMap; availability for sale or lease is "
+        "unknown.",
+
+        "Site area is a map footprint, not usable floor area.",
+
+        "Commercial activity is estimated from mapped shops and "
+        "amenities, not from footfall data.",
+
+        "Ownership, price/rent and zoning have not been assessed.",
+    ),
+
+    aliases=(
+        "commercial_site",
+        "retail_site_selection",
+        "restaurant_site_selection",
+        "food_court_site_selection",
+        "business_site_selection",
+    ),
+)
+
+
+LAND_ACQUISITION = UseCase(
+
+    id="land_acquisition",
+
+    title="Land acquisition",
+
+    description=(
+        "Find vacant land to buy for development or investment."
+    ),
+
+    example_queries=(
+        "Find vacant land above 1 acre near OMR with good "
+        "road access",
+    ),
+
+    candidate_type="land_parcel",
+
+    candidate_noun="land parcel",
+
+    candidate_source="land_parcels",
+
+    data_layers=(
+        "satellite_imagery",
+        "land_parcels",
+        "roads",
+        "zoning",
+        "flood_risk",
+        "ownership",
+    ),
+
+    criteria=(
+
+        Criterion(
+            id="parcel_size",
+            label="Parcel size",
+            weight=0.25,
+            data_layer="land_parcels",
+            evaluator="parcel_size",
+        ),
+
+        Criterion(
+            id="vacancy",
+            label="Vacancy evidence",
+            weight=0.15,
+            data_layer="land_parcels",
+            evaluator="vacancy_evidence",
+        ),
+
+        Criterion(
+            id="road_access",
+            label="Road access",
+            weight=0.20,
+            data_layer="roads",
+            evaluator="road_access",
+        ),
+
+        Criterion(
+            id="location",
+            label="Closeness to requested location",
+            weight=0.10,
+            data_layer="land_parcels",
+            evaluator="location_proximity",
+        ),
+
+        Criterion(
+            id="land_use_compatibility",
+            label="Land-use compatibility (zoning)",
+            weight=0.15,
+            data_layer="zoning",
+            missing_note="No zoning data connected.",
+        ),
+
+        Criterion(
+            id="flood_risk",
+            label="Flood risk",
+            weight=0.15,
+            data_layer="flood_risk",
+            missing_note="No flood-risk data connected.",
+        ),
+    ),
+
+    constraints=(
+        "Land should be vacant.",
+    ),
+
+    unassessed=(
+        "ownership",
+        "legal_title",
+        "price",
+    ),
+
+    default_min_area_m2=1000,
+
+    output_format="ranked_land_parcels",
+
+    recommended_action=(
+        "Shortlist the top parcels for a title search and a "
+        "site visit."
+    ),
+
+    limitations=(
+        "Land polygons come from OpenStreetMap land-use tags; "
+        "they are not legal/cadastral parcels.",
+
+        "Vacancy is inferred from map tags and has not been "
+        "verified on imagery.",
+
+        "Ownership, title, price, zoning and flood risk have "
+        "not been assessed.",
+    ),
+
+    aliases=(
+        "land_search",
+        "land_purchase",
+        "land_prospecting",
+        "vacant_land_search",
+    ),
+)
+
+
+CONSTRUCTION_PROGRESS = UseCase(
+
+    id="construction_progress",
+
+    title="Construction progress monitoring",
+
+    description=(
+        "Detect how construction sites have changed between "
+        "two dates using current vs historical imagery."
+    ),
+
+    example_queries=(
+        "Which of my construction sites have changed "
+        "significantly since last month?",
+    ),
+
+    candidate_type="construction_site",
+
+    candidate_noun="construction site",
+
+    candidate_source=None,
+
+    data_layers=(
+        "site_registry",
+        "satellite_imagery",
+        "historical_imagery",
+    ),
+
+    criteria=(
+
+        Criterion(
+            id="change_magnitude",
+            label="Estimated change magnitude",
+            weight=0.5,
+            data_layer="historical_imagery",
+            missing_note="Change detection is not implemented.",
+        ),
+
+        Criterion(
+            id="changed_area",
+            label="Changed area",
+            weight=0.3,
+            data_layer="historical_imagery",
+            missing_note="Change detection is not implemented.",
+        ),
+
+        Criterion(
+            id="imagery_quality",
+            label="Imagery quality (cloud cover, date gap)",
+            weight=0.2,
+            data_layer="satellite_imagery",
+            missing_note="Change detection is not implemented.",
+        ),
+    ),
+
+    output_format="change_report",
+
+    limitations=(
+        "SkyLens cannot yet compare imagery between dates.",
+
+        "SkyLens has no registry of the customer's sites.",
+    ),
+
+    implemented=False,
+
+    aliases=(
+        "construction_monitoring",
+        "change_detection",
+        "construction_change_detection",
+    ),
+)
+
+
+USE_CASES = {
+
+    use_case.id: use_case
+
+    for use_case in (
+        SOLAR_PROSPECTING,
+        EV_CHARGING,
+        COMMERCIAL_SITE_SELECTION,
+        LAND_ACQUISITION,
+        CONSTRUCTION_PROGRESS,
+    )
+}
+
+
+_ALIASES = {
+
+    alias: use_case.id
+
+    for use_case in USE_CASES.values()
+
+    for alias in use_case.aliases
+}
+
+
+# ============================================================
+# LOOKUP
+# ============================================================
+
+def resolve_use_case(intent_type):
+    """
+    Map DeepSeek's intent_type onto a registered use case.
+    Returns None when SkyLens has no playbook for it.
+    """
+
+    if not isinstance(intent_type, str):
+        return None
+
+    key = (
+        intent_type
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+    key = _ALIASES.get(key, key)
+
+    return USE_CASES.get(key)
+
+
+def data_layer_available(layer_id):
+
+    return bool(
+        DATA_LAYERS.get(layer_id, {}).get("available")
+    )
+
+
+def describe_use_case(use_case):
+    """
+    Public, JSON-friendly summary of a use case.
+    """
+
+    return {
+
+        "id": use_case.id,
+
+        "title": use_case.title,
+
+        "purpose": use_case.purpose or use_case.title.lower(),
+
+        "description": use_case.description,
+
+        "implemented": use_case.implemented,
+
+        "candidate_type": use_case.candidate_type,
+
+        "data_layers": [
+            {
+                "id": layer,
+                "label": DATA_LAYERS.get(layer, {}).get("label", layer),
+                "available": data_layer_available(layer),
+            }
+            for layer in use_case.data_layers
+        ],
+
+        "criteria": [
+            {
+                "id": c.id,
+                "label": c.label,
+                "weight": c.weight,
+                "measured": (
+                    c.evaluator is not None
+                    and data_layer_available(c.data_layer)
+                ),
+            }
+            for c in use_case.criteria
+        ],
+
+        "constraints": list(use_case.constraints),
+
+        "output_format": use_case.output_format,
+    }
+
+
+def planner_catalog():
+    """
+    Text block listing the use cases, injected into the DeepSeek
+    planner prompt so it stays in sync with this registry.
+    """
+
+    lines = []
+
+    for use_case in USE_CASES.values():
+
+        criteria = ", ".join(
+            c.id for c in use_case.criteria
+        )
+
+        examples = " | ".join(
+            f'"{q}"' for q in use_case.example_queries
+        )
+
+        lines.append(
+            f"- {use_case.id}: {use_case.description}\n"
+            f"  candidate_type: {use_case.candidate_type}\n"
+            f"  typical criteria: {criteria}\n"
+            f"  examples: {examples}"
+        )
+
+    return "\n".join(lines)

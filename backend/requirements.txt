@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic>=2
+python-dotenv
+openai
+geopy
+requests
+shapely
+pystac-client

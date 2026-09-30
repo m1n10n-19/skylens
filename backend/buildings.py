@@ -1,60 +1,10 @@
 import math
-import time
 
-import requests
 from shapely.geometry import Polygon
 
+from geodata import bbox_around
 
-# Try these in order.
-OVERPASS_URLS = [
-    "https://overpass.private.coffee/api/interpreter",
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-]
-
-HEADERS = {
-    "User-Agent": "SkyLens/0.1 local development"
-}
-
-
-def _query_overpass(query: str):
-    """
-    Try multiple Overpass servers.
-    """
-
-    last_error = None
-
-    for url in OVERPASS_URLS:
-
-        try:
-
-            print(f"Trying Overpass: {url}")
-
-            response = requests.post(
-                url,
-                data={"data": query},
-                headers=HEADERS,
-                timeout=30
-            )
-
-            response.raise_for_status()
-
-            return response.json()
-
-        except Exception as e:
-
-            print(
-                f"Overpass failed: {url} -> {e}"
-            )
-
-            last_error = e
-
-            time.sleep(1)
-
-    raise RuntimeError(
-        f"All Overpass servers failed. "
-        f"Last error: {last_error}"
-    )
+from overpass import query_overpass
 
 
 def get_buildings(
@@ -63,38 +13,14 @@ def get_buildings(
     radius_km: float = 1,
     minimum_area_m2: float = 500
 ):
+    """
+    OSM building footprints around a location, largest first.
+    """
 
-    # ---------------------------------------------
-    # Safety limits for MVP
-    # ---------------------------------------------
-
+    # MVP safety limit
     radius_km = min(radius_km, 2)
 
-    # ---------------------------------------------
-    # Calculate bounding box
-    # ---------------------------------------------
-
-    lat_delta = radius_km / 111
-
-    lon_delta = radius_km / (
-        111 * max(
-            abs(
-                math.cos(
-                    math.radians(latitude)
-                )
-            ),
-            0.1
-        )
-    )
-
-    south = latitude - lat_delta
-    west = longitude - lon_delta
-    north = latitude + lat_delta
-    east = longitude + lon_delta
-
-    # ---------------------------------------------
-    # Query only building ways
-    # ---------------------------------------------
+    south, west, north, east = bbox_around(latitude, longitude, radius_km)
 
     query = f"""
     [out:json][timeout:25];
@@ -105,13 +31,9 @@ def get_buildings(
     out geom;
     """
 
-    data = _query_overpass(query)
+    data = query_overpass(query)
 
     candidates = []
-
-    # ---------------------------------------------
-    # Process buildings
-    # ---------------------------------------------
 
     for element in data.get("elements", []):
 
@@ -121,17 +43,12 @@ def get_buildings(
             continue
 
         coordinates = [
-            (
-                point["lon"],
-                point["lat"]
-            )
+            (point["lon"], point["lat"])
             for point in geometry
         ]
 
         if coordinates[0] != coordinates[-1]:
-            coordinates.append(
-                coordinates[0]
-            )
+            coordinates.append(coordinates[0])
 
         try:
 
@@ -146,21 +63,14 @@ def get_buildings(
         except Exception:
             continue
 
-        # -----------------------------------------
-        # Approximate geographic area
-        # -----------------------------------------
+        # Approximate area: degrees² scaled to m² at the centroid.
 
-        centroid_lat = polygon.centroid.y
+        centroid = polygon.centroid
 
         metres_per_degree_lat = 111320
 
-        metres_per_degree_lon = (
-            111320
-            * math.cos(
-                math.radians(
-                    centroid_lat
-                )
-            )
+        metres_per_degree_lon = 111320 * math.cos(
+            math.radians(centroid.y)
         )
 
         area_m2 = (
@@ -172,45 +82,17 @@ def get_buildings(
         if area_m2 < minimum_area_m2:
             continue
 
-        centroid = polygon.centroid
-
-        tags = element.get(
-            "tags",
-            {}
-        )
+        tags = element.get("tags", {})
 
         candidates.append({
             "osm_id": element["id"],
             "osm_type": element["type"],
-
-            "latitude": round(
-                centroid.y,
-                6
-            ),
-
-            "longitude": round(
-                centroid.x,
-                6
-            ),
-
-            "area_m2": round(
-                area_m2,
-                1
-            ),
-
-            "building_type": tags.get(
-                "building",
-                "unknown"
-            ),
-
-            "name": tags.get(
-                "name"
-            )
+            "latitude": round(centroid.y, 6),
+            "longitude": round(centroid.x, 6),
+            "area_m2": round(area_m2, 1),
+            "building_type": tags.get("building", "unknown"),
+            "name": tags.get("name"),
         })
-
-    # ---------------------------------------------
-    # Largest buildings first
-    # ---------------------------------------------
 
     candidates.sort(
         key=lambda x: x["area_m2"],
