@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 import data_registry
 
-from buildings import get_buildings
+from buildings import get_buildings_with_provenance
 
 from geodata import (
     CONTEXT_LAYERS,
@@ -227,7 +227,7 @@ def _candidates(use_case, area, minimum, maximum, place):
 
         if source == "buildings":
 
-            candidates = get_buildings(
+            candidates, provenance = get_buildings_with_provenance(
                 latitude=area.latitude,
                 longitude=area.longitude,
                 radius_km=area.reach_km,
@@ -245,6 +245,8 @@ def _candidates(use_case, area, minimum, maximum, place):
             context = new_context(area.latitude, area.longitude, area.reach_km, place)
 
             context.layer_status["building_footprints"] = "loaded"
+
+            context.layer_provenance["building_footprints"] = provenance
 
         else:
 

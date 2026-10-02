@@ -6,6 +6,8 @@ from criteria import (
 
 import data_registry
 
+import evidence
+
 
 # =============================================
 # LEGACY SOLAR SCORER
@@ -126,12 +128,19 @@ def score_weighted_criteria(candidate, spec, use_case, context):
 
         if result is None:
 
+            note = _missing_note(criterion)
+
             results[criterion.id] = {
                 "label": criterion.label,
                 "weight": criterion.weight,
                 "available": False,
                 "score": None,
-                "note": _missing_note(criterion),
+                "note": note,
+                "evidence_items": evidence.dump([
+                    evidence.not_measured(
+                        criterion.label, criterion.data_layer, note
+                    )
+                ]),
             }
 
             missing.append(criterion.id)
@@ -146,6 +155,13 @@ def score_weighted_criteria(candidate, spec, use_case, context):
             "available": True,
             "score": round(score, 1),
             "evidence": result.get("evidence"),
+            "evidence_items": evidence.dump(
+                evidence.from_measurements(
+                    result.get("measurements"),
+                    criterion.data_layer,
+                    context.layer_provenance.get(criterion.data_layer),
+                )
+            ),
         }
 
         weighted_sum += criterion.weight * score

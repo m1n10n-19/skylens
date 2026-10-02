@@ -140,6 +140,12 @@ class FakeGeolocator:
         return FakeLocation(self.raw)
 
 
+# What the real Overpass client returns alongside "elements".
+OSM_BASE = "2026-09-30T08:15:02Z"
+
+RETRIEVED_AT = "2026-10-01T10:00:00+00:00"
+
+
 FAKE_SCENE = {
     "id": "S2B_MSIL2A_20260920T050649_TEST",
     "date": "2026-09-20T05:06:49+00:00",
@@ -232,7 +238,11 @@ class FakeOverpass:
         if self.error:
             raise self.error
 
-        return {"elements": self.elements}
+        return {
+            "osm3s": {"timestamp_osm_base": OSM_BASE},
+            "elements": self.elements,
+            "_retrieved_at": RETRIEVED_AT,
+        }
 
 
 class FakeDeepSeek:

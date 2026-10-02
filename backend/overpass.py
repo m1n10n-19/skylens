@@ -27,6 +27,8 @@ import os
 import re
 import time
 
+from datetime import datetime, timezone
+
 import requests
 
 
@@ -126,7 +128,13 @@ def _cache_get(key):
             return None
 
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+
+        # Files cached before fetch times were recorded: the file
+        # was written when the data was fetched.
+        data.setdefault("_retrieved_at", _iso(os.path.getmtime(path)))
+
+        return data
 
     except (OSError, ValueError):
         return None
@@ -152,6 +160,33 @@ def _cache_put(key, data):
 
     except OSError as e:
         print(f"Overpass cache write failed: {e}")
+
+
+def _iso(timestamp):
+
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat(timespec="seconds")
+
+
+def provenance(data):
+    """
+    When the map data is from, for evidence records:
+
+        data_as_of    OSM database snapshot time reported by Overpass
+                      (when the mapped data was current, not when
+                      anything was observed on the ground)
+        retrieved_at  when SkyLens fetched it (the original fetch
+                      time for cache hits)
+
+    Either may be None if unknown.
+    """
+
+    if not isinstance(data, dict):
+        return {"data_as_of": None, "retrieved_at": None}
+
+    return {
+        "data_as_of": (data.get("osm3s") or {}).get("timestamp_osm_base"),
+        "retrieved_at": data.get("_retrieved_at"),
+    }
 
 
 # ============================================================
@@ -268,6 +303,8 @@ def query_overpass(query):
                     break
 
                 print(f"Overpass OK: {url} ({elapsed:.1f}s)")
+
+                data["_retrieved_at"] = _iso(time.time())
 
                 _cache_put(key, data)
 
