@@ -343,9 +343,12 @@ def _ev(client, deepseek, overpass):
     return client.post("/analyze", json={"query": "EV plots in Adyar"}).json()
 
 
-def test_flooding_lowers_score_and_rank(client, deepseek, overpass, imagery, dem, flood_evidence):
+def test_flooding_lowers_score_and_rank(client, deepseek, overpass, imagery, dem, flood_evidence,
+                                        open_land):
 
     from tests.conftest import clear_year
+
+    open_land()
 
     imagery(clear_year())
     dem()

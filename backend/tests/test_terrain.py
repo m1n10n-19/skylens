@@ -150,9 +150,11 @@ def _ev(client, deepseek, overpass):
 
 
 def test_low_lying_site_is_flagged_not_called_flood_risk(client, deepseek, overpass, imagery, dem,
-                                                       flood_evidence):
+                                                       flood_evidence, open_land):
 
     from tests.conftest import clear_year
+
+    open_land()
 
     imagery(clear_year())
     flood_evidence()

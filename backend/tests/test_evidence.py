@@ -96,11 +96,14 @@ def test_every_evaluator_measurement_is_catalogued(land):
 
     context.meta["terrain"] = {"ring_m": 500}
 
+    candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900, "landcover": "grassland",
+                       "discovered": {"land_cover_year": "2021", "note": "test"}})
+
     from tests.conftest import flood_result
 
     candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900,
                        "flood": flood_result(flooded_seasons=2, history_share=0.3),
-                       "terrain": candidates[-1]["terrain"]})
+                       "terrain": {"measurable": True, "elevation_m": 4.0, "surroundings_m": 6.5, "relative_elevation_m": -2.5, "slope_pct": 1.2}})
 
     seen = set()
 

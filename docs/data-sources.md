@@ -17,6 +17,8 @@ Last reviewed: October 2026.
 | Sentinel-1 RTC radar (Microsoft Planetary Computer) | Standing water on candidate sites in the location's wet seasons (last 3 plus the current one), against a dry-season reference; part of the scored "Flood exposure (observed)" | STAC `sentinel-1-rtc`; 10 m; free, no key. 2 images per season; all-or-nothing within a 40 s budget so scores are reproducible. Misses floods that drain between passes; under-detects water among buildings; gaps in some months (none over Chennai in Dec 2023) |
 | JRC Global Surface Water (Microsoft Planetary Computer) | Water history of candidate sites, 1984-2020; part of flood exposure, and a "filled-in water body?" check | STAC `jrc-gsw`; 30 m; free, no key. Ends 2020; misses most short floods |
 | NASA POWER climatology | Choosing each location's wet and dry months (wettest and driest 3 consecutive months) | Free API, no key; cached per 0.5° cell. Falls back to June-December wet, January-March dry |
+| ESA WorldCover (Microsoft Planetary Computer) | Finding open land (tree, shrub, grass, crop, bare) not tagged on OpenStreetMap, as extra candidates in EV, commercial and land analyses; split at roads; land vegetated in 2021 that looks built-up in the latest Sentinel-2 image is left out | STAC `esa-worldcover`; 10 m; 2021; free (CC BY 4.0). Bare ground and built-up look alike at 10 m; patches are not legal plots |
+| OpenStreetMap protected areas | Overlap with protected areas, reserved forests and wetlands; sites ≥95% inside a protected area are not ranked; a records check is always listed | Same Overpass request. Records only some protected areas: absence does not prove land is unprotected |
 | Copernicus DEM GLO-30 (Microsoft Planetary Computer) | Elevation, height relative to surroundings and slope of shortlisted open-land sites; low-lying warning (evidence only, not scored) | STAC `cop-dem-glo-30`; 30 m; free, no key. Surface model (roofs and trees included), so buildings are not measured; ±2 m relative accuracy; data from 2011-2015. Not flood risk |
 
 ## Candidates
@@ -27,7 +29,8 @@ SkyLens already uses: no new account, key or dependency.
 | Source | Value for SkyLens | Access | Notes |
 |---|---|---|---|
 | NASADEM (SRTM) | Low: older alternative to the Copernicus DEM now in use | On Planetary Computer (`nasadem`) | |
-| ESA WorldCover / Esri land cover | Medium: annual land-cover classes, cross-check for spectral change | On Planetary Computer (`esa-worldcover`, `io-lulc-annual-v02`) | 1-2 years behind |
+| Esri annual land cover | Medium: newer annual land-cover maps than WorldCover 2021 | On Planetary Computer (`io-lulc-annual-v02`) | Could replace the 2021 map |
+| WDPA / Protected Planet | Official global protected areas | Free API, but the licence forbids commercial use without permission | Needs a licence before SkyLens can use it |
 | Open Charge Map | High for EV: OSM charger coverage is incomplete | Free REST API, key required | CC BY-SA 4.0 |
 | WorldPop | High for commercial sites: fills the "population" unknown | Free downloads and stats API; not on Planetary Computer | Residents, not footfall: label accordingly. Large rasters |
 | NASA FIRMS / MODIS fire | Low now; disaster and agriculture later | FIRMS API (free key); MODIS fire on Planetary Computer (`modis-14A1-061`) | |

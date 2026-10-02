@@ -647,7 +647,36 @@ VACANCY_SCORES = {
 }
 
 
+# Land cover of open land found in imagery (ESA WorldCover): lower
+# than the matching OSM tags, as the map is from 2021 and unverified.
+VACANCY_LANDCOVER = {
+    "bare ground": (75, "Bare ground in the 2021 land-cover map"),
+    "shrubland": (60, "Shrubland in the 2021 land-cover map"),
+    "grassland": (55, "Grassland in the 2021 land-cover map; could be a park or verge, verify"),
+    "cropland": (45, "Cropland in the 2021 land-cover map; conversion approvals likely needed"),
+    "tree cover": (35, "Tree cover in the 2021 land-cover map; clearing and permissions likely needed"),
+}
+
+
 def vacancy_evidence(candidate, context, spec):
+
+    landcover = candidate.get("landcover")
+
+    if landcover in VACANCY_LANDCOVER:
+
+        score, reason = VACANCY_LANDCOVER[landcover]
+
+        found = candidate.get("discovered") or {}
+
+        return {
+            "score": score,
+            "evidence": (
+                f"Land-cover map ({found.get('land_cover_year') or '2021'}): {landcover}; "
+                f"not tagged on OpenStreetMap. {found.get('note', '')}".strip()
+            ),
+            "reasons": [reason, "Found in imagery, not on the map"],
+            "measurements": {"landcover_class": landcover},
+        }
 
     landuse = candidate.get("landuse")
 
@@ -931,6 +960,61 @@ def _when(dates):
     return ", ".join(d[:7] for d in dates)
 
 
+def protected_status(candidate, context, spec):
+    """
+    Overlap with protected areas, reserved forests and wetlands mapped
+    on OpenStreetMap. Evidence only (weight 0). Absence on the map does
+    not prove the land is unprotected.
+    """
+
+    shape = context.shape_of(candidate)
+
+    area = shape.area
+
+    overlaps = []
+
+    for zone in context.protected:
+
+        if not shape.intersects(zone.shape):
+            continue
+
+        share = (shape.intersection(zone.shape).area / area) if area else 1.0
+
+        overlaps.append((zone, share))
+
+    protected = [(z, s) for z, s in overlaps if z.kind != "wetland"]
+
+    wetland = [(z, s) for z, s in overlaps if z.kind == "wetland"]
+
+    def label(zone):
+        name = zone.name or {"wetland": "a mapped wetland", "reserve_forest": "a reserved forest",
+                             "protected_area": "a mapped protected area"}[zone.kind]
+        return f"{name} ({zone.title})" if zone.title else name
+
+    reasons = [
+        f"Warning: overlaps {label(z)} on {round(s * 100)}% of the site"
+        for z, s in protected + wetland if s >= 0.01
+    ]
+
+    if overlaps:
+        evidence = "Overlaps " + "; ".join(f"{label(z)} ({round(s * 100)}%)" for z, s in overlaps)
+    else:
+        evidence = (
+            "No protected area, reserved forest or wetland mapped on OpenStreetMap "
+            "overlaps the site (absence on the map does not prove the land is unprotected)"
+        )
+
+    return {
+        "score": 0 if protected else 50 if wetland else 100,
+        "evidence": evidence,
+        "reasons": reasons,
+        "measurements": {
+            "protected_overlap_share": round(min(1.0, sum(s for _, s in protected)), 3),
+            "wetland_overlap_share": round(min(1.0, sum(s for _, s in wetland)), 3),
+        },
+    }
+
+
 def flood_exposure(candidate, context, spec):
     """
     Observed flood exposure from radar flood observations, the JRC
@@ -1052,4 +1136,5 @@ EVALUATORS = {
     "recent_change": recent_change,
     "terrain": terrain,
     "flood_exposure": flood_exposure,
+    "protected_status": protected_status,
 }

@@ -187,7 +187,7 @@ def test_ev_verify_list(land):
 
     assert set(ids) == {
         "parcel_size_fit", "road_access", "vacancy", "flood_risk",
-        "ownership", "grid_connection_capacity", "zoning",
+        "ownership", "grid_connection_capacity", "zoning", "protected_status",
     }
 
     # Cheapest method types first.
@@ -296,9 +296,11 @@ def test_analyze_attaches_assessment_to_ranked_candidates(client, deepseek, over
         assert [k["id"] for k in assessment["known"]] == measured
 
 
-def test_complete_run(client, deepseek, overpass, imagery, dem, flood_evidence):
+def test_complete_run(client, deepseek, overpass, imagery, dem, flood_evidence, open_land):
 
     from tests.conftest import clear_year
+
+    open_land()
 
     deepseek(planner_reply("land_acquisition"))
     overpass(land_elements())

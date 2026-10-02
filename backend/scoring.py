@@ -193,7 +193,12 @@ def score_weighted_criteria(candidate, spec, use_case, context):
                 evidence.from_measurements(
                     result.get("measurements"),
                     criterion.data_layer,
-                    context.layer_provenance.get(criterion.data_layer),
+                    # A candidate can name its own source for a layer
+                    # (open land found in imagery rather than on OSM).
+                    {
+                        **(context.layer_provenance.get(criterion.data_layer) or {}),
+                        **candidate.get("_sources", {}).get(criterion.data_layer, {}),
+                    } or None,
                 )
             ),
         }
@@ -259,6 +264,16 @@ def score_candidate(candidate, spec, use_case, context):
     }
 
     scored = {**public, **breakdown}
+
+    # A candidate can cap its confidence (e.g. open land found only in
+    # a land-cover map is weaker evidence than a tagged parcel).
+    cap = candidate.get("_max_confidence")
+
+    levels = ("low", "medium", "high")
+
+    if cap and levels.index(scored["confidence"]) > levels.index(cap):
+        scored["confidence"] = cap
+        scored["confidence_note"] = "Capped: found in imagery, not on the map."
 
     if use_case.id == "solar_prospecting":
         # Field name the existing frontend and clients read.

@@ -296,6 +296,35 @@ NASA_POWER = DataSource(
 )
 
 
+ESA_WORLDCOVER_PC = DataSource(
+
+    id="esa_worldcover_planetary_computer",
+
+    name="ESA WorldCover (Microsoft Planetary Computer)",
+
+    provider="ESA WorldCover 10 m land-cover map, via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="10 m",
+
+    temporal_resolution="Annual maps (2020, 2021)",
+
+    coverage="Global",
+
+    freshness="2021: land built on or cleared since then is checked against current Sentinel-2",
+
+    cost="free",
+
+    latency="A few seconds",
+
+    license="CC BY 4.0",
+
+    limitations=(
+        "Land cover from 2021, about 75% accurate per class globally.",
+        "Bare ground and built-up surfaces look alike at 10 m.",
+    ),
+)
+
+
 SOURCES = {
 
     source.id: source
@@ -308,6 +337,7 @@ SOURCES = {
         SENTINEL_1_PC,
         JRC_GSW_PC,
         NASA_POWER,
+        ESA_WORLDCOVER_PC,
     )
 }
 
@@ -468,6 +498,29 @@ _LAYERS = (
             "Not measurable on buildings: the surface model measures roofs.",
             "Differences under about 2 m are within the model's accuracy.",
             "Low-lying is not flood risk; drainage and flood history need verification.",
+        ),
+    ),
+
+    DataLayer(
+        id="land_cover",
+        label="Open land found in imagery",
+        source="esa_worldcover_planetary_computer",
+        other_sources=("sentinel_2_planetary_computer",),
+        capabilities=("land_cover", "open_land_discovery"),
+        limitations=(
+            "Not cadastral parcels: patches of open land, split at mapped roads.",
+            "Land cover is from 2021 and unverified on the ground.",
+        ),
+    ),
+
+    DataLayer(
+        id="protected_areas",
+        label="Protected areas, reserved forests and wetlands",
+        source="osm_overpass",
+        capabilities=("protected_status",),
+        limitations=(
+            "Only what is tagged on OpenStreetMap; official forest, wetland, coastal "
+            "regulation and eco-sensitive zone records were not checked.",
         ),
     ),
 )

@@ -23,6 +23,7 @@ import buildings
 import change_detection
 import flood
 import geodata
+import landcover
 import terrain
 import main
 import pipeline
@@ -453,6 +454,8 @@ def isolated_env(monkeypatch):
     monkeypatch.setattr(flood, "search", no_network)
     monkeypatch.setattr(flood, "read", no_network)
     monkeypatch.setattr(flood, "climatology", no_network)
+    monkeypatch.setattr(landcover, "search_tiles", no_network)
+    monkeypatch.setattr(landcover, "read_classes", no_network)
 
     yield
 
@@ -613,5 +616,38 @@ def flood_evidence(monkeypatch):
             return results, info
 
         monkeypatch.setattr(flood, "measure_sites", fake)
+
+    return install
+
+
+@pytest.fixture
+def open_land(monkeypatch):
+    """
+    open_land(found=[...], problems=[...]) fakes landcover.discover:
+    found is a list of (dx_m, dy_m, side_m, land cover) squares.
+    """
+
+    def install(found=(), problems=()):
+
+        def fake(area_geometry, context, existing, min_area_m2=0, max_area_m2=None, **kwargs):
+            candidates = []
+            for i, (dx, dy, side, cover) in enumerate(found, start=1):
+                shape = geodata._polygon(square(dx, dy, side), context.proj)
+                lon, lat = context.proj.to_lonlat(shape.centroid.x, shape.centroid.y)
+                candidates.append({
+                    "candidate_id": f"landcover-{i}", "latitude": lat, "longitude": lon,
+                    "area_m2": round(shape.area, 1), "site_type": f"untagged open land ({cover})",
+                    "site_kind": "open_land", "building_type": None, "landuse": None,
+                    "landcover": cover, "name": None,
+                    "discovered": {"source": landcover.SOURCE_ID, "land_cover_year": "2021",
+                                   "classes": {cover: 1.0}, "checked_on": "2026-09-26",
+                                   "note": "Found in the land-cover map, not tagged on OpenStreetMap."},
+                    "_sources": {"land_parcels": {"source_id": landcover.SOURCE_ID}},
+                    "_shape": shape,
+                })
+            return candidates, {"source": landcover.SOURCE_ID, "tiles": ["test"], "land_cover_year": "2021",
+                                "problems": list(problems), "patches_found": len(candidates)}
+
+        monkeypatch.setattr(landcover, "discover", fake)
 
     return install

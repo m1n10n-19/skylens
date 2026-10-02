@@ -228,6 +228,7 @@
 
     typeLabel(candidate) {
       if (candidate.change_type) return "Change";
+      if (candidate.discovered) return "Land cover (2021 map)";
       return candidate.site_type ? "Land use (inferred)" : "Building type";
     },
 

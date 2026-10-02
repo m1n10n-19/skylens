@@ -67,6 +67,17 @@ NEW_LAYERS = {
         "source": "Copernicus DEM (Microsoft Planetary Computer)",
         "available": True,
     },
+    # Phase 2: open land found in imagery, and protected areas.
+    "land_cover": {
+        "label": "Open land found in imagery",
+        "source": "ESA WorldCover (Microsoft Planetary Computer)",
+        "available": True,
+    },
+    "protected_areas": {
+        "label": "Protected areas, reserved forests and wetlands",
+        "source": "OpenStreetMap (Overpass)",
+        "available": True,
+    },
 }
 
 

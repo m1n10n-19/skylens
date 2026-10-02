@@ -84,6 +84,12 @@ VERIFY = {
         "records_check",
         "Open water was recorded on the site in past satellite images.",
     ),
+    "protected_status": (
+        "Protected status",
+        "Is the site in a protected forest, wetland, coastal regulation zone or eco-sensitive zone?",
+        "records_check",
+        "OpenStreetMap records only some protected areas; official records were not checked.",
+    ),
     "permits": (
         "Permits",
         "Is the change covered by building or land-use permits?",

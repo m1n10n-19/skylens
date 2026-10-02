@@ -23,6 +23,11 @@ import terrain
 
 import flood
 
+import landcover
+
+# A candidate at least this much inside a protected area is not ranked.
+PROTECTED_DROP_SHARE = 0.95
+
 from buildings import get_buildings_with_provenance
 
 from geodata import (
@@ -260,6 +265,78 @@ def _satellite(latitude, longitude, radius_km):
     return satellite, "loaded"
 
 
+def _discover_open_land(area, context, osm_candidates, minimum, maximum):
+    """
+    Open land found in imagery (landcover.discover), added to the OSM
+    candidates. Problems never stop the analysis: they are reported in
+    completeness and the OSM candidates are still ranked.
+    """
+
+    from shapely.geometry import shape as to_shape
+
+    print("\nSTEP 5a: Finding open land in imagery...")
+
+    try:
+
+        found, info = landcover.discover(
+            to_shape(area.geometry), context,
+            [c["_shape"] for c in osm_candidates], minimum, maximum,
+        )
+
+    except Exception as e:
+
+        print("OPEN LAND DISCOVERY FAILED:", repr(e))
+
+        context.meta["land_cover_problem"] = (
+            f"Open land could not be looked for in imagery ({type(e).__name__}: {e}); "
+            "only land tagged on OpenStreetMap was considered."
+        )
+
+        return []
+
+    context.layer_status["land_cover"] = "loaded"
+
+    context.layer_provenance["land_cover"] = {
+        "source_id": info["source"], "observed_at": None, "data_as_of": info["land_cover_year"],
+        "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+    context.meta["land_cover"] = info
+
+    if info["problems"]:
+        context.meta["land_cover_problem"] = " ".join(info["problems"])
+
+    print("STEP 5a COMPLETE:", len(found), "patches added")
+
+    return found
+
+
+def _drop_protected(candidates, context):
+    """
+    (kept, dropped): candidates at least PROTECTED_DROP_SHARE inside a
+    mapped protected area or reserved forest are not ranked.
+    """
+
+    zones = [z for z in context.protected if z.kind != "wetland"]
+
+    if not zones:
+        return candidates, []
+
+    kept, dropped = [], []
+
+    for candidate in candidates:
+
+        shape = context.shape_of(candidate)
+
+        inside = sum(shape.intersection(z.shape).area for z in zones if shape.intersects(z.shape))
+
+        share = inside / shape.area if shape.area else (1.0 if any(z.shape.contains(shape) for z in zones) else 0.0)
+
+        (dropped if share >= PROTECTED_DROP_SHARE else kept).append(candidate)
+
+    return kept, dropped
+
+
 def _candidates(use_case, spec, area, minimum, maximum, place):
     """
     Candidates plus the scoring context. For land and sites the
@@ -321,6 +398,9 @@ def _candidates(use_case, spec, area, minimum, maximum, place):
             candidates, context = collect_candidates_and_context(
                 source, area, minimum, maximum, layers, place
             )
+
+            if use_case.discover_open_land:
+                candidates += _discover_open_land(area, context, candidates, minimum, maximum)
 
     except change_detection.ChangeDataUnavailable:
         raise
@@ -612,7 +692,7 @@ def _completeness(use_case, area, context, satellite_status):
             f"Not loaded for this analysis: {data_registry.layer_label(layer)}."
         )
 
-    for problem in ("recent_change_problem", "terrain_problem", "flood_problem"):
+    for problem in ("land_cover_problem", "recent_change_problem", "terrain_problem", "flood_problem"):
         if context.meta.get(problem):
             reasons.append(context.meta[problem])
 
@@ -797,6 +877,8 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         ],
     })
 
+    candidates, protected_dropped = _drop_protected(candidates, context)
+
     step("candidates", "done", count=len(candidates))
 
     _environment(use_case, context, candidates, emit)
@@ -902,6 +984,22 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     limitations = [f"Searched {area.description}."] + list(use_case.limitations)
 
+    if protected_dropped:
+        names = sorted({z.name for z in context.protected if z.name and z.kind != "wetland"})
+        limitations.append(
+            f"{len(protected_dropped)} candidate(s) lying inside mapped protected areas"
+            + (f" ({', '.join(names)})" if names else "")
+            + " were not ranked."
+        )
+
+    found_in_imagery = sum(1 for c in candidates if c.get("discovered"))
+
+    if found_in_imagery:
+        limitations.append(
+            f"{found_in_imagery} candidate(s) are open land found in the 2021 land-cover map "
+            "and not tagged on OpenStreetMap: patches split at roads, not legal plots."
+        )
+
     change_meta = context.meta.get("change_detection")
 
     if change_meta:
@@ -965,6 +1063,8 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
             "minimum_area_m2": minimum,
             "maximum_area_m2": maximum,
             "target_area_m2": spec.area.target_m2,
+            "found_in_imagery": sum(1 for c in candidates if c.get("discovered")),
+            "excluded_as_protected": len(protected_dropped),
             "evidence_coverage": (
                 top[0]["evidence_coverage"] if top else 0.0
             ),

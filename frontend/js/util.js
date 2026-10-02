@@ -141,6 +141,8 @@ window.SL = window.SL || {};
     shading: ["Shading", "sun"],
     historical_imagery: ["Historical imagery", "satellite"],
     terrain: ["Terrain", "chart"],
+    land_cover: ["Open land in imagery", "satellite"],
+    protected_areas: ["Protected areas", "shield"],
     site_registry: ["Your sites", "folder"],
   };
 

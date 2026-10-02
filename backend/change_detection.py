@@ -957,6 +957,54 @@ def compare(geometry, before_date=None, after_date=None, change_types=CHANGE_TYP
 
 
 # ============================================================
+# CURRENT SURFACE
+# ============================================================
+
+# A pixel looks built-up (or bare: at 10 m they look alike) when it has
+# little vegetation and a positive built-up index.
+BUILT_NDVI_MAX = 0.2
+
+BUILT_NDBI_MIN = 0.0
+
+
+def built_like_now(grid, today=None, search=None, reader=None):
+    """
+    (built_like, clear, scene summary) from the most recent clear
+    Sentinel-2 image of the grid's area (AFTER_LOOKBACK_DAYS back).
+    built_like is only meaningful where clear is True. Raises
+    ChangeDataUnavailable without a clear image.
+    """
+
+    search = search or search_scenes
+
+    reader = reader or read_band
+
+    today = today or date.today()
+
+    start = today - timedelta(days=AFTER_LOOKBACK_DAYS)
+
+    scene, checked = pick_scene(
+        search(grid.bbox_lonlat, start, today, collection=SENTINEL_2.collection),
+        grid, prefer=lambda i: -i.datetime.timestamp(), reader=reader,
+        sensor=SENTINEL_2, deadline=time.monotonic() + TIME_BUDGET_SECONDS,
+    )
+
+    if scene is None:
+        raise ChangeDataUnavailable(
+            f"No Sentinel-2 image between {start} and {today} had at least "
+            f"{round(MIN_CLEAR_FRACTION * 100)}% of the area clear of cloud.",
+            {"after": checked},
+        )
+
+    idx = spectral_indices(_read_scene_bands(scene, grid, reader))
+
+    with np.errstate(invalid="ignore"):
+        built = (idx["NDVI"] < BUILT_NDVI_MAX) & (idx["NDBI"] > BUILT_NDBI_MIN)
+
+    return built & scene.clear, scene.clear, scene.summary()
+
+
+# ============================================================
 # DETECT
 # ============================================================
 

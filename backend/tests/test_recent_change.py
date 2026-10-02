@@ -120,8 +120,9 @@ def _ev(client, deepseek, overpass):
 
 
 def test_construction_on_shortlisted_site_is_flagged(client, deepseek, overpass, imagery, dem,
-                                                     flood_evidence):
+                                                     flood_evidence, open_land):
 
+    open_land()
     dem()
     flood_evidence()
 
@@ -188,8 +189,9 @@ def test_stable_site_gets_no_warning_or_verify_item(client, deepseek, overpass, 
 
 
 def test_imagery_problem_is_partial_not_failure(client, deepseek, overpass, imagery, dem,
-                                                flood_evidence):
+                                                flood_evidence, open_land):
 
+    open_land()
     dem()
     flood_evidence()
 
@@ -210,7 +212,9 @@ def test_imagery_problem_is_partial_not_failure(client, deepseek, overpass, imag
     assert entry["score"] is None
 
 
-def test_no_candidates_means_no_imagery_and_not_partial(client, deepseek, overpass, imagery):
+def test_no_candidates_means_no_imagery_and_not_partial(client, deepseek, overpass, imagery, open_land):
+
+    open_land()
 
     fake = imagery(clear_year())
 

@@ -109,6 +109,11 @@ _RADAR = (
 
 _JRC = "JRC Global Surface Water occurrence (Landsat, 1984-2020)"
 
+_OSM_PROTECTED = (
+    "Overlap of the site outline with areas tagged on OpenStreetMap; the map "
+    "records only some protected areas"
+)
+
 _DEM = (
     "Copernicus DEM GLO-30 surface model (includes trees and buildings; "
     "about ±2 m relative accuracy; acquired 2011-2015)"
@@ -260,6 +265,19 @@ MEASUREMENTS = {
     ),
     "water_occurrence_mean": (
         "Mean water occurrence over the site, 1984-2020", "percent", "measured", _JRC,
+    ),
+
+    # Land cover and protection
+    "landcover_class": (
+        "Land cover in the ESA WorldCover map", None, "observed",
+        "Read from the ESA WorldCover land-cover map (2021); not verified on the ground",
+    ),
+    "protected_overlap_share": (
+        "Share of the site inside mapped protected areas or reserved forests", "fraction",
+        "measured", _OSM_PROTECTED,
+    ),
+    "wetland_overlap_share": (
+        "Share of the site inside mapped wetlands", "fraction", "measured", _OSM_PROTECTED,
     ),
 
     # Terrain (Copernicus DEM)

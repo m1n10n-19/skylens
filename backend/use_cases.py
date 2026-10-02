@@ -112,6 +112,9 @@ class UseCase:
 
     implemented: bool = True
 
+    # Add open land found in imagery (landcover.py) to the OSM candidates.
+    discover_open_land: bool = False
+
     aliases: tuple = ()
 
 
@@ -264,6 +267,8 @@ EV_CHARGING = UseCase(
         "flood_risk",
         "historical_imagery",
         "terrain",
+        "land_cover",
+        "protected_areas",
     ),
 
     criteria=(
@@ -351,7 +356,19 @@ EV_CHARGING = UseCase(
             data_layer="terrain",
             evaluator="terrain",
         ),
+
+        Criterion(
+            id="protected_status",
+            label="Protected areas and wetlands (OpenStreetMap)",
+            # Evidence only; sites entirely inside a protected area are
+            # excluded before ranking.
+            weight=0.0,
+            data_layer="protected_areas",
+            evaluator="protected_status",
+        ),
     ),
+
+    discover_open_land=True,
 
     constraints=(
         "Site should be vacant land.",
@@ -434,6 +451,8 @@ COMMERCIAL_SITE_SELECTION = UseCase(
         "population",
         "historical_imagery",
         "terrain",
+        "land_cover",
+        "protected_areas",
     ),
 
     criteria=(
@@ -513,7 +532,19 @@ COMMERCIAL_SITE_SELECTION = UseCase(
             data_layer="terrain",
             evaluator="terrain",
         ),
+
+        Criterion(
+            id="protected_status",
+            label="Protected areas and wetlands (OpenStreetMap)",
+            # Evidence only; sites entirely inside a protected area are
+            # excluded before ranking.
+            weight=0.0,
+            data_layer="protected_areas",
+            evaluator="protected_status",
+        ),
     ),
+
+    discover_open_land=True,
 
     constraints=(
         "Site must fit the requested floor/land area.",
@@ -587,6 +618,8 @@ LAND_ACQUISITION = UseCase(
         "ownership",
         "historical_imagery",
         "terrain",
+        "land_cover",
+        "protected_areas",
     ),
 
     criteria=(
@@ -658,7 +691,19 @@ LAND_ACQUISITION = UseCase(
             data_layer="terrain",
             evaluator="terrain",
         ),
+
+        Criterion(
+            id="protected_status",
+            label="Protected areas and wetlands (OpenStreetMap)",
+            # Evidence only; sites entirely inside a protected area are
+            # excluded before ranking.
+            weight=0.0,
+            data_layer="protected_areas",
+            evaluator="protected_status",
+        ),
     ),
+
+    discover_open_land=True,
 
     constraints=(
         "Land should be vacant.",
