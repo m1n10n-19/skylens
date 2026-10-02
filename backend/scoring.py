@@ -94,19 +94,20 @@ def _missing_state(criterion, context):
     """
     Why a criterion has no evidence:
 
-        not_implemented   SkyLens has no evaluator for it yet
         data_unavailable  no provider for its data layer
+        not_implemented   the data exists, but SkyLens has no
+                          evaluator for it yet
         data_not_loaded   the layer has a provider but was not
                           fetched for this analysis
         not_measurable    the evaluator could not measure it for
                           this candidate
     """
 
-    if criterion.evaluator is None:
-        return "not_implemented"
-
     if not data_registry.is_available(criterion.data_layer):
         return "data_unavailable"
+
+    if criterion.evaluator is None:
+        return "not_implemented"
 
     if not context.has_layer(criterion.data_layer):
         return "data_not_loaded"

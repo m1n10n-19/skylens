@@ -63,8 +63,21 @@ def test_each_missing_reason_has_its_own_state(land):
 
     assert states["road_access"] == "measured"
     assert states["competition"] == "not_measurable"
-    # Population has no evaluator yet.
-    assert states["population"] == "not_implemented"
+    # No population data provider.
+    assert states["population"] == "data_unavailable"
+
+
+def test_not_implemented_means_data_exists_but_no_evaluator():
+
+    context = new_context(LAT, LON, 1)
+
+    context.layer_status["building_footprints"] = "loaded"
+
+    scored = _scored({"latitude": LAT, "longitude": LON, "area_m2": 900}, SOLAR_PROSPECTING, context)
+
+    # Roads have a provider; solar accessibility has no evaluator yet.
+    assert scored["criteria"]["accessibility"]["state"] == "not_implemented"
+    assert scored["criteria"]["shading"]["state"] == "data_unavailable"
 
 
 def test_unavailable_layer_state():
@@ -76,8 +89,8 @@ def test_unavailable_layer_state():
     scored = _scored({"latitude": LAT, "longitude": LON, "area_m2": 900, "landuse": "vacant"},
                      EV_CHARGING, context)
 
-    # flood_risk has no evaluator; roads has a provider but wasn't loaded.
-    assert scored["criteria"]["flood_risk"]["state"] == "not_implemented"
+    # No flood provider; roads has a provider but wasn't loaded.
+    assert scored["criteria"]["flood_risk"]["state"] == "data_unavailable"
     assert scored["criteria"]["road_access"]["state"] == "data_not_loaded"
 
 
@@ -139,9 +152,11 @@ def test_tag_based_knowledge_is_marked_observed(land):
 
     basis = {k["id"]: k["basis"] for k in result["known"]}
 
+    # Only a tag: observed.
     assert basis["vacancy"] == "observed"
-    # Road access has a measured distance and an observed road name.
-    assert basis["road_access"] == "observed"
+    # Measured distance; the observed road name is context only.
+    assert basis["road_access"] == "measured"
+    assert basis["major_road_proximity"] == "measured"
     assert basis["commercial_activity"] == "measured"
 
 
@@ -153,7 +168,7 @@ def test_unknown_items_explain_why(land):
 
     unknown = {u["id"]: u for u in result["unknown"]}
 
-    assert unknown["flood_risk"]["state"] == "not_implemented"
+    assert unknown["flood_risk"]["state"] == "data_unavailable"
     assert unknown["flood_risk"]["reason"]
     assert unknown["ownership"]["state"] == "not_assessed"
     assert unknown["grid_connection_capacity"]["label"] == "Grid connection capacity"

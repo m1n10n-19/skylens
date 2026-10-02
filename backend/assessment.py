@@ -146,8 +146,10 @@ VERIFY = {
 }
 
 
-# Evidence statuses from strongest to weakest; a known criterion's
-# basis is the weakest status among its evidence items.
+# Evidence statuses from strongest to weakest. A known criterion's
+# basis is the weakest status among its evidence items that carry a
+# unit (distances, areas, counts); descriptive tags such as a road's
+# name are context and only decide the basis when nothing else does.
 _BASIS_ORDER = ("measured", "inferred", "observed")
 
 
@@ -161,7 +163,12 @@ def _label(item_id):
 
 def _basis(items):
 
-    statuses = {item["status"] for item in items}
+    quantified = [
+        item for item in items
+        if (item.get("measurement") or {}).get("unit")
+    ]
+
+    statuses = {item["status"] for item in quantified or items}
 
     for status in reversed(_BASIS_ORDER):
         if status in statuses:
