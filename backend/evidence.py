@@ -102,6 +102,13 @@ _SHARE = (
     "between the two Sentinel-2 images passed the thresholds"
 )
 
+_RADAR = (
+    "Sentinel-1 radar (VV) in the location's wettest months, compared with a "
+    "dry-season reference; misses floods between satellite passes"
+)
+
+_JRC = "JRC Global Surface Water occurrence (Landsat, 1984-2020)"
+
 _DEM = (
     "Copernicus DEM GLO-30 surface model (includes trees and buildings; "
     "about ±2 m relative accuracy; acquired 2011-2015)"
@@ -234,6 +241,27 @@ MEASUREMENTS = {
     "water_loss_share": (
         "Share of the site where water receded", "fraction", "measured", _SHARE,
     ),
+    # Flood exposure (Sentinel-1, JRC)
+    "observed_flood_images": (
+        "Wet-season radar images showing standing water on the site", "count", "measured", _RADAR,
+    ),
+    "wet_season_images": (
+        "Wet-season radar images examined", "count", "measured", _RADAR,
+    ),
+    "observed_flood_seasons": (
+        "Wet seasons with standing water seen on the site", "count", "measured", _RADAR,
+    ),
+    "max_flooded_share": (
+        "Largest share of the site under standing water in one radar image", "fraction",
+        "measured", _RADAR,
+    ),
+    "water_history_share": (
+        "Share of the site ever seen as open water, 1984-2020", "fraction", "measured", _JRC,
+    ),
+    "water_occurrence_mean": (
+        "Mean water occurrence over the site, 1984-2020", "percent", "measured", _JRC,
+    ),
+
     # Terrain (Copernicus DEM)
     "elevation_m": (
         "Surface elevation above sea level (median over the site)", "m", "measured", _DEM,

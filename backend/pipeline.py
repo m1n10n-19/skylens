@@ -6,6 +6,7 @@ AnalysisSpec + UseCase
     -> deterministic scoring -> ranking -> decision -> report
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
@@ -19,6 +20,8 @@ from assessment import assess
 import change_detection
 
 import terrain
+
+import flood
 
 from buildings import get_buildings_with_provenance
 
@@ -460,64 +463,124 @@ def _recent_change(use_case, spec, context, top, originals, emit):
     return True
 
 
-def _terrain(use_case, context, top, originals, emit):
+def _environment(use_case, context, candidates, emit):
     """
-    For use cases with a terrain criterion: read the Copernicus DEM
-    once around the shortlisted sites and attach each site's terrain.
-    Problems never stop the analysis; they are reported in
-    completeness. Returns True if terrain was attached.
+    For use cases with terrain or flood-exposure criteria: measure
+    every candidate before scoring (flood exposure is scored, so sites
+    outside the shortlist must not rank without it). One read per
+    source for the whole set. Problems never stop the analysis; they
+    are reported in completeness.
     """
 
-    if not top or not any(c.evaluator == "terrain" for c in use_case.criteria):
-        return False
+    evaluators = {c.evaluator for c in use_case.criteria}
 
-    print("\nSTEP 6c: Measuring terrain on the shortlist...")
+    wants_terrain = "terrain" in evaluators or "flood_exposure" in evaluators
+
+    wants_flood = "flood_exposure" in evaluators
+
+    if not (wants_terrain or wants_flood):
+        return
+
+    if not candidates:
+        # Nothing to measure: these layers are not missing.
+        for layer, wanted in (("terrain", wants_terrain), ("flood_risk", wants_flood)):
+            if wanted:
+                context.layer_status[layer] = "not_needed"
+        return
+
+    print("\nSTEP 5b: Measuring terrain and flood exposure...")
 
     proj = context.proj
 
     to_lonlat = lambda shape: reproject(lambda x, y, z=None: proj.to_lonlat(x, y), shape)
 
-    shortlist = [originals[candidate_key(c)] for c in top]
+    shapes = [context.shape_of(c) for c in candidates]
 
-    sites = []
+    retrieved = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    for candidate in shortlist:
-        shape = context.shape_of(candidate)
-        sites.append((
-            to_lonlat(shape),
-            to_lonlat(shape.buffer(terrain.RING_M)),
-            candidate.get("site_kind") == "building",
-        ))
+    jobs = ThreadPoolExecutor(max_workers=2)
 
-    try:
-        results, info = terrain.measure_sites(sites)
-    except Exception as e:
-        print("TERRAIN FAILED:", repr(e))
-        context.meta["terrain_problem"] = (
-            f"Terrain on the shortlisted sites could not be measured ({type(e).__name__}: {e})."
-        )
-        emit("layer", {"id": "terrain", "status": "failed"})
-        return False
+    terrain_job = jobs.submit(terrain.measure_sites, [
+        (to_lonlat(shape), to_lonlat(shape.buffer(terrain.RING_M)), c.get("site_kind") == "building")
+        for c, shape in zip(candidates, shapes)
+    ]) if wants_terrain else None
 
-    for candidate, result in zip(shortlist, results):
-        candidate["terrain"] = result
+    flood_job = jobs.submit(
+        flood.measure_sites, [to_lonlat(shape) for shape in shapes],
+        area_center=(context.proj.lat0, context.proj.lon0),
+    ) if wants_flood else None
 
-    context.layer_status["terrain"] = "loaded"
+    jobs.shutdown(wait=False)
 
-    context.layer_provenance["terrain"] = {
-        "source_id": info["source"],
-        "observed_at": None,
-        "data_as_of": None,
-        "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
+    if terrain_job is not None:
 
-    context.meta["terrain"] = info
+        try:
 
-    emit("layer", {"id": "terrain", "status": "used"})
+            results, info = terrain_job.result()
 
-    print("STEP 6c COMPLETE")
+            for candidate, result in zip(candidates, results):
+                candidate["terrain"] = result
 
-    return True
+            context.layer_status["terrain"] = "loaded"
+
+            context.layer_provenance["terrain"] = {
+                "source_id": info["source"], "observed_at": None,
+                "data_as_of": None, "retrieved_at": retrieved,
+            }
+
+            context.meta["terrain"] = info
+
+            emit("layer", {"id": "terrain", "status": "used"})
+
+        except Exception as e:
+
+            print("TERRAIN FAILED:", repr(e))
+
+            context.meta["terrain_problem"] = (
+                f"Terrain could not be measured ({type(e).__name__}: {e})."
+            )
+
+            emit("layer", {"id": "terrain", "status": "failed"})
+
+    if flood_job is not None:
+
+        try:
+
+            results, info = flood_job.result()
+
+            radar = "observed_flooding" in info
+
+            if not radar and "water_history" not in info:
+                raise RuntimeError("; ".join(info["problems"]) or "no flood evidence")
+
+            for candidate, result in zip(candidates, results):
+                candidate["flood"] = result
+
+            context.layer_status["flood_risk"] = "loaded"
+
+            context.layer_provenance["flood_risk"] = {
+                "source_id": flood.S1_SOURCE_ID if radar else flood.JRC_SOURCE_ID,
+                "observed_at": None, "data_as_of": None, "retrieved_at": retrieved,
+            }
+
+            context.meta["flood"] = info
+
+            if info["problems"]:
+                context.meta["flood_problem"] = " ".join(info["problems"])
+
+            emit("layer", {"id": "flood_risk", "status": "used"})
+
+        except Exception as e:
+
+            print("FLOOD EXPOSURE FAILED:", repr(e))
+
+            context.meta["flood_problem"] = (
+                f"Flood exposure could not be measured ({type(e).__name__}: {e})."
+            )
+
+            emit("layer", {"id": "flood_risk", "status": "failed"})
+
+    print("STEP 5b COMPLETE")
 
 
 def _completeness(use_case, area, context, satellite_status):
@@ -541,6 +604,7 @@ def _completeness(use_case, area, context, satellite_status):
         and c.weight > 0
         and data_registry.is_available(c.data_layer)
         and not context.has_layer(c.data_layer)
+        and context.layer_status.get(c.data_layer) != "not_needed"
     })
 
     for layer in skipped:
@@ -548,7 +612,7 @@ def _completeness(use_case, area, context, satellite_status):
             f"Not loaded for this analysis: {data_registry.layer_label(layer)}."
         )
 
-    for problem in ("recent_change_problem", "terrain_problem"):
+    for problem in ("recent_change_problem", "terrain_problem", "flood_problem"):
         if context.meta.get(problem):
             reasons.append(context.meta[problem])
 
@@ -735,6 +799,8 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     step("candidates", "done", count=len(candidates))
 
+    _environment(use_case, context, candidates, emit)
+
     step(
         "scoring", "running",
         criteria=len(use_case.criteria),
@@ -784,10 +850,9 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     originals = {candidate_key(c): c for c in candidates}
 
-    changed = _recent_change(use_case, spec, context, top, originals, emit)
-
-    # Both always run; rescore once if either attached evidence.
-    if _terrain(use_case, context, top, originals, emit) or changed:
+    # Evidence only (weight 0): rescoring the shortlist adds it
+    # without changing scores or ranks.
+    if _recent_change(use_case, spec, context, top, originals, emit):
         top = [
             score_candidate(originals[candidate_key(c)], spec, use_case, context)
             for c in top

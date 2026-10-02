@@ -119,9 +119,11 @@ def _ev(client, deepseek, overpass):
     return client.post("/analyze", json={"query": "EV plots in Adyar"}).json()
 
 
-def test_construction_on_shortlisted_site_is_flagged(client, deepseek, overpass, imagery, dem):
+def test_construction_on_shortlisted_site_is_flagged(client, deepseek, overpass, imagery, dem,
+                                                     flood_evidence):
 
     dem()
+    flood_evidence()
 
     today = date.today()
 
@@ -185,7 +187,11 @@ def test_stable_site_gets_no_warning_or_verify_item(client, deepseek, overpass, 
     assert "recent_change" not in {v["id"] for v in site["assessment"]["verify"]}
 
 
-def test_imagery_problem_is_partial_not_failure(client, deepseek, overpass, imagery):
+def test_imagery_problem_is_partial_not_failure(client, deepseek, overpass, imagery, dem,
+                                                flood_evidence):
+
+    dem()
+    flood_evidence()
 
     imagery({"cloudy": {"day": date.today() - timedelta(days=3), "cloudy": True}})
 

@@ -72,10 +72,17 @@ VERIFY = {
         "Mapped outlines are not cadastral parcels.",
     ),
     "flood_risk": (
-        "Flood risk",
+        "Flood history and zoning",
         "Has the site flooded, or is it in an official flood zone?",
         "records_check",
-        "No flood risk data is connected.",
+        "Satellite passes miss floods that drain quickly, and official flood-zone maps were not checked.",
+    ),
+    # Only listed when water was recorded on the site (see EXTRA).
+    "water_body": (
+        "Water body status",
+        "Is the site a filled-in lake, tank or wetland, and is building on it permitted?",
+        "records_check",
+        "Open water was recorded on the site in past satellite images.",
     ),
     "permits": (
         "Permits",
@@ -200,6 +207,22 @@ CONDITIONAL = {
 }
 
 
+def _water_recorded(scored):
+
+    from criteria import WATER_HISTORY_MINOR
+
+    share = (scored.get("measurements") or {}).get("water_history_share")
+
+    return share is not None and share >= WATER_HISTORY_MINOR
+
+
+# Further verify items a measured criterion can raise:
+# criterion id -> [(verify id, condition)]; "why" is the evidence.
+EXTRA = {
+    "flood_risk": [("water_body", _water_recorded)],
+}
+
+
 # Evidence statuses from strongest to weakest. A known criterion's
 # basis is the weakest status among its evidence items that carry a
 # unit (distances, areas, counts); descriptive tags such as a road's
@@ -282,6 +305,21 @@ def assess(scored, use_case):
                 "method_type": method_type,
                 "status": "verification_required",
             })
+
+        for extra_id, extra_condition in EXTRA.get(criterion_id, ()):
+
+            if measured and extra_condition(scored):
+
+                label, question, method_type, _ = VERIFY[extra_id]
+
+                verify.append({
+                    "id": extra_id,
+                    "label": label,
+                    "question": question,
+                    "why": entry.get("evidence"),
+                    "method_type": method_type,
+                    "status": "verification_required",
+                })
 
     for item_id in use_case.unassessed:
 

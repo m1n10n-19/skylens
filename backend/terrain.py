@@ -150,11 +150,10 @@ def measure_sites(sites, search=None, reader=None):
     Raises TerrainUnavailable when no DEM tile covers the area.
     """
 
-    from rasterio import features
     from rasterio.warp import transform_geom
     from shapely.ops import unary_union
 
-    from change_detection import make_grid
+    from change_detection import make_grid, rasterize
 
     search = search or search_tiles
 
@@ -179,7 +178,7 @@ def measure_sites(sites, search=None, reader=None):
     slope = slope_percent(dem)
 
     def mask(geometry, all_touched=False):
-        return features.rasterize(
+        return rasterize(
             [transform_geom("EPSG:4326", grid.crs, mapping(geometry))],
             out_shape=(grid.height, grid.width), transform=grid.transform,
             fill=0, dtype="uint8", all_touched=all_touched,

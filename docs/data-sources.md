@@ -14,6 +14,9 @@ Last reviewed: October 2026.
 | OpenStreetMap via Overpass | Roads, buildings, POIs, land-use tags, EV chargers, parking | Public Overpass servers; cached 24 h (`overpass.py`) |
 | Sentinel-2 L2A (Microsoft Planetary Computer) | Change detection from 2017, recent change on shortlisted sites, context imagery | STAC `sentinel-2-l2a`; 10 m; free, no key |
 | Landsat Collection 2 Level-2 (Microsoft Planetary Computer) | Change detection for periods before 2017 (back to 1984) | STAC `landsat-c2-l2`; 30 m; free, no key. Landsat 7 after May 2003 is a last resort (permanent data gaps) |
+| Sentinel-1 RTC radar (Microsoft Planetary Computer) | Standing water on candidate sites in the location's wet seasons (last 3 plus the current one), against a dry-season reference; part of the scored "Flood exposure (observed)" | STAC `sentinel-1-rtc`; 10 m; free, no key. 2 images per season; all-or-nothing within a 40 s budget so scores are reproducible. Misses floods that drain between passes; under-detects water among buildings; gaps in some months (none over Chennai in Dec 2023) |
+| JRC Global Surface Water (Microsoft Planetary Computer) | Water history of candidate sites, 1984-2020; part of flood exposure, and a "filled-in water body?" check | STAC `jrc-gsw`; 30 m; free, no key. Ends 2020; misses most short floods |
+| NASA POWER climatology | Choosing each location's wet and dry months (wettest and driest 3 consecutive months) | Free API, no key; cached per 0.5° cell. Falls back to June-December wet, January-March dry |
 | Copernicus DEM GLO-30 (Microsoft Planetary Computer) | Elevation, height relative to surroundings and slope of shortlisted open-land sites; low-lying warning (evidence only, not scored) | STAC `cop-dem-glo-30`; 30 m; free, no key. Surface model (roofs and trees included), so buildings are not measured; ±2 m relative accuracy; data from 2011-2015. Not flood risk |
 
 ## Candidates
@@ -24,8 +27,6 @@ SkyLens already uses: no new account, key or dependency.
 | Source | Value for SkyLens | Access | Notes |
 |---|---|---|---|
 | NASADEM (SRTM) | Low: older alternative to the Copernicus DEM now in use | On Planetary Computer (`nasadem`) | |
-| Sentinel-1 radar | High: sees through clouds (monsoon gaps), flood and water mapping | On Planetary Computer (`sentinel-1-rtc`, `sentinel-1-grd`) | Different physics from optical; needs its own thresholds |
-| JRC Global Surface Water | High: where water has occurred since 1984 (flood history) | On Planetary Computer (`jrc-gsw`) | |
 | ESA WorldCover / Esri land cover | Medium: annual land-cover classes, cross-check for spectral change | On Planetary Computer (`esa-worldcover`, `io-lulc-annual-v02`) | 1-2 years behind |
 | Open Charge Map | High for EV: OSM charger coverage is incomplete | Free REST API, key required | CC BY-SA 4.0 |
 | WorldPop | High for commercial sites: fills the "population" unknown | Free downloads and stats API; not on Planetary Computer | Residents, not footfall: label accordingly. Large rasters |
@@ -39,10 +40,9 @@ SkyLens already uses: no new account, key or dependency.
 
 ## Suggested order
 
-1. Sentinel-1 and JRC Global Surface Water (flood and water evidence that works through clouds).
-2. Open Charge Map (EV competition).
-3. WorldPop (population around commercial sites).
-4. Check access for TNGIS and India-WRIS before planning work on them.
+1. Open Charge Map (EV competition).
+2. WorldPop (population around commercial sites).
+3. Check access for TNGIS and India-WRIS before planning work on them.
 
 ## Adding a source
 

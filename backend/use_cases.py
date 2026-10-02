@@ -326,10 +326,10 @@ EV_CHARGING = UseCase(
 
         Criterion(
             id="flood_risk",
-            label="Flood risk",
+            label="Flood exposure (observed)",
             weight=0.15,
             data_layer="flood_risk",
-            missing_note="No flood-risk data connected.",
+            evaluator="flood_exposure",
         ),
 
         Criterion(
@@ -633,10 +633,10 @@ LAND_ACQUISITION = UseCase(
 
         Criterion(
             id="flood_risk",
-            label="Flood risk",
+            label="Flood exposure (observed)",
             weight=0.15,
             data_layer="flood_risk",
-            missing_note="No flood-risk data connected.",
+            evaluator="flood_exposure",
         ),
 
         Criterion(

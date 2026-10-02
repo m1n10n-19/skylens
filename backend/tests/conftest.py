@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 import buildings
 import change_detection
+import flood
 import geodata
 import terrain
 import main
@@ -449,6 +450,9 @@ def isolated_env(monkeypatch):
     monkeypatch.setattr(change_detection, "read_band", no_network)
     monkeypatch.setattr(terrain, "search_tiles", no_network)
     monkeypatch.setattr(terrain, "read_dem", no_network)
+    monkeypatch.setattr(flood, "search", no_network)
+    monkeypatch.setattr(flood, "read", no_network)
+    monkeypatch.setattr(flood, "climatology", no_network)
 
     yield
 
@@ -560,5 +564,54 @@ def dem(monkeypatch):
         monkeypatch.setattr(terrain, "search_tiles", fake.search)
         monkeypatch.setattr(terrain, "read_dem", fake.reader)
         return fake
+
+    return install
+
+
+def flood_result(flooded_seasons=0, history_share=0.0, radar=True, history=True):
+    """
+    One site's flood.measure_sites result.
+    """
+
+    flooded = [
+        {"date": f"{2025 - k}-11-10", "season": f"Sep-Nov {2025 - k}", "share": 0.6}
+        for k in range(flooded_seasons)
+    ]
+
+    return {
+        "water_history": {"share": history_share, "mean_occurrence": history_share * 10}
+        if history else None,
+        "observed": {
+            "images": 8, "flooded_images": len(flooded),
+            "flooded_seasons": flooded_seasons,
+            "max_share": 0.6 if flooded else 0.0, "flooded": flooded,
+        } if radar else None,
+    }
+
+
+@pytest.fixture
+def flood_evidence(monkeypatch):
+    """
+    flood_evidence(default=..., by_site=fn) fakes flood.measure_sites:
+    every site gets `default`, or by_site(index) if given.
+    """
+
+    def install(default=None, by_site=None, problems=()):
+
+        default = default or flood_result()
+
+        def fake(sites, **kwargs):
+            results = [by_site(i) if by_site else default for i in range(len(sites))]
+            info = {"problems": list(problems),
+                    "seasons": {"wet_months": ["Sep", "Oct", "Nov"], "dry_months": ["Jan", "Feb", "Mar"],
+                                "chosen_by": "test"}}
+            if any(r["observed"] for r in results):
+                info["observed_flooding"] = {"source": flood.S1_SOURCE_ID, "wet_images": [],
+                                             "dry_images": [], "method": "test"}
+            if any(r["water_history"] for r in results):
+                info["water_history"] = {"source": flood.JRC_SOURCE_ID, "period": "1984-2020"}
+            return results, info
+
+        monkeypatch.setattr(flood, "measure_sites", fake)
 
     return install

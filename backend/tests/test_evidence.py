@@ -96,6 +96,12 @@ def test_every_evaluator_measurement_is_catalogued(land):
 
     context.meta["terrain"] = {"ring_m": 500}
 
+    from tests.conftest import flood_result
+
+    candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900,
+                       "flood": flood_result(flooded_seasons=2, history_share=0.3),
+                       "terrain": candidates[-1]["terrain"]})
+
     seen = set()
 
     for name, evaluator in EVALUATORS.items():
@@ -208,13 +214,18 @@ def test_land_use_tag_is_observed_not_measured(land):
 
 def test_unavailable_layer_gives_one_not_measured_item(land):
 
-    entry = _ev_scored(land, 2001)["criteria"]["flood_risk"]
+    by_id, context = land
+
+    entry = score_weighted_criteria(
+        by_id[2001], AnalysisSpec(query="q", intent_type="land_acquisition"),
+        USE_CASES["land_acquisition"], context,
+    )["criteria"]["land_use_compatibility"]
 
     assert entry["evidence_items"] == [{
-        "claim": "Flood risk",
+        "claim": "Land-use compatibility (zoning)",
         "status": "not_measured",
         "measurement": None,
-        "layer": "flood_risk",
+        "layer": "zoning",
         "source": None,
         "source_id": None,
         "observed_at": None,

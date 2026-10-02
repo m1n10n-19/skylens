@@ -209,6 +209,93 @@ COPERNICUS_DEM_PC = DataSource(
 )
 
 
+SENTINEL_1_PC = DataSource(
+
+    id="sentinel_1_rtc_planetary_computer",
+
+    name="Sentinel-1 radar (Microsoft Planetary Computer)",
+
+    provider="ESA Copernicus Sentinel-1 RTC (radiometrically terrain corrected), via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="10 m",
+
+    temporal_resolution="About 12 days (one satellite since 2022)",
+
+    coverage="Global land; gaps in some months",
+
+    freshness="Wet seasons of the last three years and the current one",
+
+    cost="free",
+
+    latency="Seconds per image; large remote files",
+
+    license="Copernicus Sentinel data terms",
+
+    limitations=(
+        "Floods that drain between satellite passes are missed.",
+        "Water among buildings is under-detected (radar double bounce).",
+        "Some months have no images (e.g. December 2023 over Chennai).",
+    ),
+)
+
+
+JRC_GSW_PC = DataSource(
+
+    id="jrc_gsw_planetary_computer",
+
+    name="JRC Global Surface Water (Microsoft Planetary Computer)",
+
+    provider="EC Joint Research Centre Global Surface Water v1.3, via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="30 m",
+
+    temporal_resolution="Summary of 1984-2020",
+
+    coverage="Global",
+
+    freshness="Ends in 2020",
+
+    cost="free",
+
+    license="Copernicus programme, free use with attribution",
+
+    latency="A few seconds",
+
+    limitations=(
+        "Built from optical Landsat images: most short floods are not captured.",
+        "Ends in 2020.",
+    ),
+)
+
+
+NASA_POWER = DataSource(
+
+    id="nasa_power_climatology",
+
+    name="NASA POWER rainfall climatology",
+
+    provider="NASA Prediction Of Worldwide Energy Resources, monthly climatology API",
+
+    spatial_resolution="About 0.5 degree",
+
+    temporal_resolution="Long-term monthly means",
+
+    coverage="Global",
+
+    freshness="Climatology (long-term averages)",
+
+    cost="free",
+
+    latency="About 2 seconds; cached per location",
+
+    license="NASA open data",
+
+    limitations=(
+        "Used only to choose each location's wet and dry months.",
+    ),
+)
+
+
 SOURCES = {
 
     source.id: source
@@ -218,6 +305,9 @@ SOURCES = {
         SENTINEL_2_PC,
         LANDSAT_PC,
         COPERNICUS_DEM_PC,
+        SENTINEL_1_PC,
+        JRC_GSW_PC,
+        NASA_POWER,
     )
 }
 
@@ -304,8 +394,14 @@ _LAYERS = (
 
     DataLayer(
         id="flood_risk",
-        label="Flood risk",
+        label="Flood exposure (observed water and flooding)",
+        source="sentinel_1_rtc_planetary_computer",
+        other_sources=("jrc_gsw_planetary_computer", "nasa_power_climatology"),
         capabilities=("flood_exposure",),
+        limitations=(
+            "Observed exposure, not a flood probability or an official flood-zone map.",
+            "Floods between satellite passes, and before 1984, are missed.",
+        ),
     ),
 
     DataLayer(

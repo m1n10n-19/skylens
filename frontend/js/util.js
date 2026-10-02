@@ -133,7 +133,7 @@ window.SL = window.SL || {};
     points_of_interest: ["Commercial activity", "store"],
     ev_chargers: ["Existing EV chargers", "bolt"],
     parking: ["Parking", "parking"],
-    flood_risk: ["Flood risk", "shield"],
+    flood_risk: ["Flood exposure", "shield"],
     population: ["Population", "users"],
     zoning: ["Zoning", "layers"],
     ownership: ["Ownership", "file"],

@@ -38,11 +38,21 @@ CHANGED_LAYERS = {
         "source": "Microsoft Planetary Computer",
         "available": True,
     },
+    # Phase 2: observed flood exposure (Sentinel-1, JRC water history).
+    "flood_risk": {
+        "label": "Flood exposure (observed water and flooding)",
+        "source": "Sentinel-1 radar (Microsoft Planetary Computer)",
+        "available": True,
+    },
 }
 
 # Phase 2: construction_progress became the implemented
 # land-and-construction change module.
 CHANGED_USE_CASES = {"construction_progress"}
+
+# Items inside use cases deliberately changed in Phase 2 (the flood
+# criterion and layer are now measured as observed flood exposure).
+CHANGED_ITEMS = {"flood_risk"}
 
 
 # ============================================================
@@ -89,6 +99,9 @@ def test_describe_use_case_keeps_every_old_field():
             assert len(new[list_key]) >= len(old[list_key])
 
             for old_item, new_item in zip(old[list_key], new[list_key]):
+                if old_item["id"] in CHANGED_ITEMS:
+                    assert new_item["id"] == old_item["id"]
+                    continue
                 for key, value in old_item.items():
                     assert new_item[key] == value, (use_case.id, list_key, old_item["id"], key)
 
@@ -171,7 +184,8 @@ def test_resolve_returns_the_provider():
 
     assert data_registry.resolve("roads").id == "osm_overpass"
     assert data_registry.resolve("satellite_imagery").id == "sentinel_2_planetary_computer"
-    assert data_registry.resolve("flood_risk") is None
+    assert data_registry.resolve("flood_risk").id == "sentinel_1_rtc_planetary_computer"
+    assert data_registry.resolve("zoning") is None
     assert data_registry.resolve("no_such_layer") is None
 
 
@@ -221,23 +235,26 @@ def test_describe_available_layer_includes_source_metadata():
 
 def test_describe_unavailable_layer_has_no_source():
 
-    flood = data_registry.describe_layer("flood_risk")
+    zoning = data_registry.describe_layer("zoning")
 
-    assert flood["available"] is False
-    assert flood["source"] is None
-    assert flood["capabilities"] == ["flood_exposure"]
+    assert zoning["available"] is False
+    assert zoning["source"] is None
+    assert zoning["capabilities"] == ["zoning"]
 
 
 def test_use_cases_endpoint_exposes_registry_metadata(client):
 
     body = client.get("/use-cases").json()
 
-    ev = next(u for u in body["use_cases"] if u["id"] == "ev_charging_site_selection")
+    land = next(u for u in body["use_cases"] if u["id"] == "land_acquisition")
 
-    layers = {l["id"]: l for l in ev["data_layers"]}
+    layers = {l["id"]: l for l in land["data_layers"]}
 
     assert layers["roads"]["source"]["cost"] == "free"
-    assert layers["flood_risk"]["source"] is None
+    assert layers["zoning"]["source"] is None
+    assert [s["id"] for s in layers["flood_risk"]["other_sources"]] == [
+        "jrc_gsw_planetary_computer", "nasa_power_climatology",
+    ]
 
 
 # ============================================================
@@ -292,4 +309,4 @@ def test_evidence_section_reads_sources_from_registry(client, deepseek, overpass
     assert sources["roads"] == "Test map provider"
     # Layer-specific note still wins over the provider name.
     assert sources["land_parcels"] == "OpenStreetMap land-use tags (not cadastral parcels)"
-    assert sources["flood_risk"] is None
+    assert sources["zoning"] is None

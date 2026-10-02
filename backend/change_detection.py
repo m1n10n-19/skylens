@@ -31,6 +31,7 @@ patch becomes a ranked candidate.
 """
 
 import math
+import threading
 import time
 
 from concurrent.futures import ThreadPoolExecutor
@@ -164,6 +165,28 @@ class ChangeDataUnavailable(Exception):
         super().__init__(reason)
         self.reason = reason
         self.tried = tried or {}
+
+
+# ============================================================
+# RASTERIZE
+# ============================================================
+
+# Terrain and flood are measured in parallel threads; concurrent
+# rasterize calls were seen to lose their transform (rasterio's
+# NotGeoreferencedWarning), which would put site masks in the wrong
+# place. Rasterizing is fast, so it is serialized; reads stay parallel.
+_RASTERIZE_LOCK = threading.Lock()
+
+
+def rasterize(shapes, **kwargs):
+    """
+    rasterio.features.rasterize, one call at a time.
+    """
+
+    from rasterio import features
+
+    with _RASTERIZE_LOCK:
+        return features.rasterize(shapes, **kwargs)
 
 
 # ============================================================
@@ -346,7 +369,7 @@ def patches(labels, transform, before, after, min_pixels=MIN_PATCH_PIXELS):
     if not found:
         return []
 
-    ids = features.rasterize(
+    ids = rasterize(
         ((p["geometry"], i) for i, p in enumerate(found, start=1)),
         out_shape=labels.shape, transform=transform, fill=0, dtype="int32",
     )
@@ -520,7 +543,6 @@ def make_grid(geometry_lonlat, pixel_m=10, max_pixels=MAX_GRID_PIXELS):
     pixels inside it.
     """
 
-    from rasterio import features
     from rasterio.transform import from_origin
     from rasterio.warp import transform_bounds, transform_geom
 
@@ -550,7 +572,7 @@ def make_grid(geometry_lonlat, pixel_m=10, max_pixels=MAX_GRID_PIXELS):
 
     transform = from_origin(minx, maxy, pixel_m, pixel_m)
 
-    inside = features.rasterize(
+    inside = rasterize(
         [transform_geom("EPSG:4326", crs, mapping(geometry_lonlat))],
         out_shape=(height, width), transform=transform, fill=0, dtype="uint8",
     ).astype(bool)
@@ -562,12 +584,25 @@ def make_grid(geometry_lonlat, pixel_m=10, max_pixels=MAX_GRID_PIXELS):
 # PROVIDER (Microsoft Planetary Computer)
 # ============================================================
 
+_CLIENT = None
+
+
 def _catalog():
+    """
+    The Planetary Computer STAC client, opened once per process
+    (opening it costs a round trip); items are signed as they arrive.
+    """
 
-    import planetary_computer
-    import pystac_client
+    global _CLIENT
 
-    return pystac_client.Client.open(CATALOG_URL, modifier=planetary_computer.sign_inplace)
+    if _CLIENT is None:
+
+        import planetary_computer
+        import pystac_client
+
+        _CLIENT = pystac_client.Client.open(CATALOG_URL, modifier=planetary_computer.sign_inplace)
+
+    return _CLIENT
 
 
 def search_scenes(bbox_lonlat, start, end, collection=SENTINEL_2.collection):
@@ -1032,7 +1067,6 @@ def measure_parcels(geometries, before_date=None, after_date=None, today=None,
     images compared. Raises ChangeDataUnavailable without clear imagery.
     """
 
-    from rasterio import features
     from rasterio.warp import transform_geom
     from shapely.ops import unary_union
 
@@ -1046,7 +1080,7 @@ def measure_parcels(geometries, before_date=None, after_date=None, today=None,
 
     for geometry in geometries:
 
-        inside = features.rasterize(
+        inside = rasterize(
             [transform_geom("EPSG:4326", grid.crs, mapping(geometry))],
             out_shape=(grid.height, grid.width), transform=grid.transform,
             fill=0, dtype="uint8",

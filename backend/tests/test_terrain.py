@@ -1,6 +1,7 @@
 """
-Terrain from the Copernicus DEM on shortlisted sites: evidence and
-warnings only, never changing scores, never presented as flood risk.
+Terrain from the Copernicus DEM: an evidence-only criterion of its
+own, never presented as flood risk; its relative height also feeds the
+flood exposure score.
 """
 
 import numpy as np
@@ -148,11 +149,13 @@ def _ev(client, deepseek, overpass):
     return client.post("/analyze", json={"query": "EV plots in Adyar"}).json()
 
 
-def test_low_lying_site_is_flagged_not_called_flood_risk(client, deepseek, overpass, imagery, dem):
+def test_low_lying_site_is_flagged_not_called_flood_risk(client, deepseek, overpass, imagery, dem,
+                                                       flood_evidence):
 
     from tests.conftest import clear_year
 
     imagery(clear_year())
+    flood_evidence()
     # Parcel 2001 sits 0-60 m east, 10-70 m north of the centre.
     dem(ground=6.0, low_by=3.0, radius_m=120)
 
@@ -169,8 +172,13 @@ def test_low_lying_site_is_flagged_not_called_flood_risk(client, deepseek, overp
     assert "lower than the ground within 500 m" in entry["evidence"]
     assert "flood" not in entry["evidence"].lower()
 
-    # Flood risk stays unmeasured: terrain is not flood risk.
-    assert site["criteria"]["flood_risk"]["state"] == "data_unavailable"
+    # Low-lying ground only lowers the flood exposure score, which is
+    # built from observed water, not from terrain alone.
+    flood = site["criteria"]["flood_risk"]
+
+    assert flood["state"] == "measured"
+    assert flood["score"] == 85
+    assert "below the surrounding ground" in flood["evidence"]
 
     assert any(r.startswith("Warning: low-lying") for r in site["reasons"])
 
@@ -221,7 +229,7 @@ def test_terrain_never_changes_scores(client, deepseek, overpass, imagery, dem, 
     assert key(with_dem) == key(without)
 
     assert without["completeness"]["status"] == "partial"
-    assert any(r.startswith("Terrain on the shortlisted sites could not be measured")
+    assert any(r.startswith("Terrain could not be measured")
                for r in without["completeness"]["reasons"])
     assert without["top_prospects"][0]["criteria"]["terrain"]["state"] == "data_not_loaded"
 

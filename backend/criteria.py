@@ -27,6 +27,8 @@ from change_detection import PARCEL_ALERT_SHARE
 
 from terrain import LOW_LYING_M, NOISE_M
 
+from flood import FLOODED_SHARE
+
 from geodata import (
     CHARGER_RADIUS_M,
     MAJOR_ROAD_RADIUS_M,
@@ -909,6 +911,123 @@ def terrain(candidate, context, spec):
     }
 
 
+# Flood exposure score: 100 minus these, never below 0. Fixed so the
+# same observations always give the same score.
+FLOOD_PENALTIES = {
+    "flooded_once": 50,          # standing water seen in a wet season
+    "flooded_again": 20,         # ... in two or more wet seasons
+    "water_history_major": 30,   # >= 20% of the site was ever open water
+    "water_history_minor": 15,   # 5-20%
+    "low_lying": 15,             # >= LOW_LYING_M below the surroundings
+}
+
+WATER_HISTORY_MAJOR = 0.2
+
+WATER_HISTORY_MINOR = 0.05
+
+
+def _when(dates):
+
+    return ", ".join(d[:7] for d in dates)
+
+
+def flood_exposure(candidate, context, spec):
+    """
+    Observed flood exposure from radar flood observations, the JRC
+    water history and terrain (flood.measure_sites, terrain.measure_sites).
+    This scores what was observed; it is not a flood probability.
+    """
+
+    measured = candidate.get("flood")
+
+    if measured is None:
+        return None
+
+    observed = measured["observed"]
+
+    history = measured["water_history"]
+
+    if observed is None and history is None:
+        return {"not_measured": "Neither radar flood observations nor water history could be read."}
+
+    score = 100
+
+    parts = []
+
+    reasons = []
+
+    measurements = {}
+
+    if observed is not None:
+
+        flooded = observed["flooded"]
+
+        measurements.update({
+            "observed_flood_images": observed["flooded_images"],
+            "wet_season_images": observed["images"],
+            "observed_flood_seasons": observed["flooded_seasons"],
+            "max_flooded_share": observed["max_share"],
+        })
+
+        if flooded:
+            score -= FLOOD_PENALTIES["flooded_once"]
+            if observed["flooded_seasons"] >= 2:
+                score -= FLOOD_PENALTIES["flooded_again"]
+            when = _when([f["date"] for f in flooded])
+            parts.append(
+                f"standing water on at least {round(FLOODED_SHARE * 100)}% of the site in "
+                f"{observed['flooded_images']} of {observed['images']} wet-season radar images ({when})"
+            )
+            reasons.append(f"Warning: standing water seen on the site by radar ({when})")
+        else:
+            parts.append(f"no standing water seen in {observed['images']} wet-season radar images")
+
+    else:
+        parts.append("radar flood observations unavailable")
+
+    if history is not None:
+
+        share = history["share"]
+
+        measurements.update({
+            "water_history_share": share,
+            "water_occurrence_mean": history["mean_occurrence"],
+        })
+
+        if share >= WATER_HISTORY_MAJOR:
+            score -= FLOOD_PENALTIES["water_history_major"]
+        elif share >= WATER_HISTORY_MINOR:
+            score -= FLOOD_PENALTIES["water_history_minor"]
+
+        if share >= WATER_HISTORY_MINOR:
+            parts.append(f"open water recorded on {round(share * 100)}% of the site at times in 1984-2020")
+            reasons.append(
+                f"Warning: open water on {round(share * 100)}% of the site at times in "
+                f"1984-2020 (possible filled water body or wetland)"
+            )
+        else:
+            parts.append("no open water recorded on the site in 1984-2020")
+
+    else:
+        parts.append("water history unavailable")
+
+    ground = candidate.get("terrain") or {}
+
+    if ground.get("measurable"):
+        relative = ground["relative_elevation_m"]
+        measurements["relative_elevation_m"] = relative
+        if relative <= -LOW_LYING_M:
+            score -= FLOOD_PENALTIES["low_lying"]
+            parts.append(f"about {abs(relative):.1f} m below the surrounding ground")
+
+    return {
+        "score": max(0, score),
+        "evidence": "Observed: " + "; ".join(parts),
+        "reasons": reasons,
+        "measurements": measurements,
+    }
+
+
 # ============================================================
 # REGISTRY
 # ============================================================
@@ -932,4 +1051,5 @@ EVALUATORS = {
     "imagery_quality": imagery_quality,
     "recent_change": recent_change,
     "terrain": terrain,
+    "flood_exposure": flood_exposure,
 }
