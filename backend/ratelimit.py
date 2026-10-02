@@ -13,9 +13,9 @@ Signed-in team members (see auth.py) are not limited.
 
 Settings (optional, via environment / .env, read on each query):
 
-    RATE_LIMIT_PER_IP        queries per IP per window (default 10, 0 disables)
+    RATE_LIMIT_PER_IP        queries per IP per window (default 1000, 0 disables)
     RATE_LIMIT_WINDOW_HOURS  length of the per-IP window (default 24)
-    RATE_LIMIT_DAILY_TOTAL   anonymous queries per 24 h, all IPs (default 200, 0 disables)
+    RATE_LIMIT_DAILY_TOTAL   anonymous queries per 24 h, all IPs (default 5000, 0 disables)
 
 Counts are kept in memory, so they reset when the server restarts.
 That is fine for a single uvicorn process (such as one Render
@@ -85,11 +85,11 @@ def check(ip):
     user-facing "error" and "retry_after" seconds.
     """
 
-    per_ip = int(_setting("RATE_LIMIT_PER_IP", 10))
+    per_ip = int(_setting("RATE_LIMIT_PER_IP", 1000))
 
     window = _setting("RATE_LIMIT_WINDOW_HOURS", 24) * 3600
 
-    daily_total = int(_setting("RATE_LIMIT_DAILY_TOTAL", 200))
+    daily_total = int(_setting("RATE_LIMIT_DAILY_TOTAL", 5000))
 
     now = time.time()
 

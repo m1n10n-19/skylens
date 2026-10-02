@@ -7,7 +7,7 @@ window.SL = window.SL || {};
   // anywhere else the backend serves this page, so use the same origin.
   SL.API = location.port === "5500" ? "http://127.0.0.1:8000" : "";
 
-  SL.FREE_INTENTS = 3;
+  SL.FREE_INTENTS = 1000;
 
   // Signed-in team member ({token, username}) or null; see SL.auth.
   // Signed-in users have no question limit.
