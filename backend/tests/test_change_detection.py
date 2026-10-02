@@ -40,10 +40,10 @@ def test_reflectance_applies_offset_by_processing_baseline():
 def test_spectral_indices():
 
     bands = {
-        "B03": np.array([[0.05]], dtype="float32"),
-        "B04": np.array([[0.05]], dtype="float32"),
-        "B08": np.array([[0.45]], dtype="float32"),
-        "B11": np.array([[0.15]], dtype="float32"),
+        "green": np.array([[0.05]], dtype="float32"),
+        "red": np.array([[0.05]], dtype="float32"),
+        "nir": np.array([[0.45]], dtype="float32"),
+        "swir": np.array([[0.15]], dtype="float32"),
     }
 
     idx = cd.spectral_indices(bands)
@@ -57,7 +57,7 @@ def test_zero_reflectance_is_nan_not_zero():
 
     zero = np.zeros((1, 1), dtype="float32")
 
-    idx = cd.spectral_indices({"B03": zero, "B04": zero, "B08": zero, "B11": zero})
+    idx = cd.spectral_indices({"green": zero, "red": zero, "nir": zero, "swir": zero})
 
     assert np.isnan(idx["NDVI"][0, 0])
 
@@ -309,7 +309,7 @@ def test_analyze_change_end_to_end(client, deepseek, imagery):
     verify = {v["id"] for v in change["assessment"]["verify"]}
 
     assert {"cause_of_change", "permits"} <= verify
-    assert any("Compared Sentinel-2 scenes" in l for l in body["limitations"])
+    assert any(l.startswith("Compared Sentinel-2 images (10 m)") for l in body["limitations"])
     assert "between" in body["decision"]["summary"]
 
 
@@ -343,10 +343,19 @@ def test_analyze_change_provider_failure_is_502(client, deepseek, monkeypatch):
 
 
 def test_analyze_change_uses_stated_period(client, deepseek, imagery):
+    """
+    "since 2023" fixes the year only: the earlier image is taken from
+    2023 at the same time of year as the later one.
+    """
+
+    after_day = date.today() - timedelta(days=5)
+
+    target = cd.same_season(2023, after_day)
 
     fake = imagery({
-        "old": {"day": date(2023, 1, 15), "cloudy": False},
-        "after": {"day": date.today() - timedelta(days=5), "cloudy": False},
+        "jan": {"day": date(2023, 1, 15), "cloudy": False},
+        "same-season": {"day": target + timedelta(days=4), "cloudy": False},
+        "after": {"day": after_day, "cloudy": False},
     })
 
     deepseek(planner_reply("construction_progress",
@@ -355,8 +364,40 @@ def test_analyze_change_uses_stated_period(client, deepseek, imagery):
     body = client.post("/analyze", json={"query": "What changed since 2023?"}).json()
 
     assert body["analysis_spec"]["time_range"]["start"] == "2023-01-01"
-    assert body["change_detection"]["before"]["date"] == "2023-01-15"
-    assert fake.searches[1][0] == date(2023, 1, 1) - timedelta(days=45)
+    assert body["analysis_spec"]["time_range"]["start_precision"] == "year"
+    assert body["change_detection"]["before"]["id"] == "same-season"
+    assert body["change_detection"]["season_gap_days"] <= 4
+    assert fake.searches[1][0] == target - timedelta(days=45)
+
+
+def test_stated_month_is_respected(client, deepseek, imagery):
+
+    fake = imagery({
+        "june": {"day": date(2023, 6, 10), "cloudy": False},
+        "after": {"day": date.today() - timedelta(days=5), "cloudy": False},
+    })
+
+    deepseek(planner_reply("construction_progress", time_range={"start": "2023-06"}))
+
+    body = client.post("/analyze", json={"query": "What changed since June 2023?"}).json()
+
+    assert body["analysis_spec"]["time_range"]["start_precision"] == "month"
+    assert body["change_detection"]["before"]["date"] == "2023-06-10"
+    assert fake.searches[1][0] == date(2023, 6, 1) - timedelta(days=45)
+
+
+@pytest.mark.parametrize("raw,precision", [
+    ({"start": "2019"}, "year"),
+    ({"start": "2019-06"}, "month"),
+    ({"start": "2019-06-15"}, "day"),
+    ({"years_back": 5}, "day"),
+    ({"months_back": 3}, "day"),
+    ({"end": "2022"}, None),
+    (None, None),
+])
+def test_time_range_precision(raw, precision):
+
+    assert parse_time_range(raw, today=TODAY).start_precision == precision
 
 
 # ============================================================
@@ -408,3 +449,184 @@ def test_change_scores_discriminate_between_strong_changes():
 
     assert small < large < 100
     assert strong < stronger < 100
+
+
+# ============================================================
+# LANDSAT AND TILES
+# ============================================================
+
+def test_landsat_reflectance_scaling():
+
+    dn = np.array([[0, 7273, 21818]], dtype="uint16")
+
+    out = cd.landsat_reflectance(dn)
+
+    assert np.isnan(out[0, 0])
+    assert out[0, 1:].tolist() == pytest.approx([0.0, 0.4], abs=1e-3)
+
+
+@pytest.mark.parametrize("qa,clear", [
+    (64, True),        # clear
+    (128, True),       # water
+    (1, False),        # fill
+    (64 | 2, False),   # dilated cloud
+    (64 | 4, False),   # cirrus
+    (8, False),        # cloud
+    (64 | 16, False),  # cloud shadow
+    (0, False),        # nothing flagged clear
+])
+def test_landsat_clear_mask(qa, clear):
+
+    assert cd.landsat_clear_mask(np.array([[qa]], dtype="uint16"))[0, 0] == clear
+
+
+@pytest.mark.parametrize("target,sensor", [
+    (date(2025, 10, 1), "sentinel-2"),
+    (date(2017, 3, 1), "sentinel-2"),
+    (date(2017, 1, 20), "landsat"),   # season window reaches into 2016
+    (date(2010, 1, 1), "landsat"),
+    (date(1990, 6, 1), "landsat"),
+])
+def test_sensor_choice(target, sensor):
+
+    assert cd.choose_sensor(target).id == sensor
+
+
+def test_tiles_from_the_same_day_are_combined():
+    """
+    An area on a tile edge: each tile covers half of it. Read alone,
+    neither reaches the 60% clear threshold; combined they cover all.
+    """
+
+    day_before, day_after = date(2025, 9, 28), date(2026, 9, 26)
+
+    imagery = FakeImagery({
+        "before-w": {"day": day_before, "cloudy": False, "covers": "west"},
+        "before-e": {"day": day_before, "cloudy": False, "covers": "east"},
+        "after-w": {"day": day_after, "cloudy": False, "covers": "west", "cleared": "all"},
+        "after-e": {"day": day_after, "cloudy": False, "covers": "east", "cleared": "all"},
+    })
+
+    result = cd.detect_changes(AREA, today=TODAY, search=imagery.search, reader=imagery.reader)
+
+    assert result.clear_fraction_both == pytest.approx(1.0, abs=0.01)
+    assert len(result.after["items"]) == 2
+    assert result.after["id"] == "+".join(result.after["items"])
+
+    # The whole area changed: one patch, both halves included.
+    assert len(result.observations) == 1
+    assert result.observations[0]["area_m2"] == pytest.approx(result.area_km2 * 1e6, rel=0.02)
+
+
+def test_half_covered_area_is_not_enough():
+
+    imagery = FakeImagery({
+        "after-w": {"day": date(2026, 9, 26), "cloudy": False, "covers": "west"},
+    })
+
+    with pytest.raises(cd.ChangeDataUnavailable):
+        cd.detect_changes(AREA, today=TODAY, search=imagery.search, reader=imagery.reader)
+
+
+def test_pre_2017_comparison_uses_landsat_for_both_images():
+
+    imagery = FakeImagery({
+        "l5": {"day": date(2010, 1, 20), "cloudy": False, "platform": "landsat-5"},
+        "l9": {"day": date(2026, 9, 20), "cloudy": False, "platform": "landsat-9", "cleared": "all"},
+        # A clear Sentinel-2 image exists too, but is never mixed in.
+        "s2": {"day": date(2026, 9, 26), "cloudy": False},
+    })
+
+    result = cd.detect_changes(AREA, before_date=date(2010, 1, 1), today=TODAY,
+                               search=imagery.search, reader=imagery.reader)
+
+    assert result.sensor == "Landsat"
+    assert result.resolution_m == 30
+    assert result.source == "landsat_c2_l2_planetary_computer"
+    assert result.before["platform"] == "landsat-5"
+    assert result.after["platform"] == "landsat-9"
+    assert "30 m" in result.method and "4,500 m²" in result.method
+
+    obs = result.observations[0]
+
+    assert obs["change_type"] == "built_or_bare_increase"
+    assert obs["area_m2"] % 900 == 0
+    assert not any(h.startswith("s2/") for h in imagery.reads)
+
+
+def test_landsat_7_gap_years_are_a_last_resort():
+
+    imagery = FakeImagery({
+        # Closest to the 2012 target, but Landsat 7 after 2003.
+        "l7": {"day": date(2012, 1, 2), "cloudy": False, "platform": "landsat-7"},
+        "l5": {"day": date(2011, 11, 25), "cloudy": False, "platform": "landsat-5"},
+        "l8": {"day": date(2026, 9, 20), "cloudy": False, "platform": "landsat-8"},
+    })
+
+    result = cd.detect_changes(AREA, before_date=date(2012, 1, 1), today=TODAY,
+                               search=imagery.search, reader=imagery.reader)
+
+    assert result.before["platform"] == "landsat-5"
+    assert result.before["last_resort"] is False
+
+
+def test_landsat_7_used_when_nothing_else_is_clear():
+
+    imagery = FakeImagery({
+        "l7": {"day": date(2012, 1, 2), "cloudy": False, "platform": "landsat-7"},
+        "l5-cloudy": {"day": date(2011, 12, 20), "cloudy": True, "platform": "landsat-5"},
+        "l8": {"day": date(2026, 9, 20), "cloudy": False, "platform": "landsat-8"},
+    })
+
+    result = cd.detect_changes(AREA, before_date=date(2012, 1, 1), today=TODAY,
+                               search=imagery.search, reader=imagery.reader)
+
+    assert result.before["platform"] == "landsat-7"
+    assert result.before["last_resort"] is True
+
+
+def test_analyze_change_since_2010_uses_landsat(client, deepseek, imagery):
+
+    after_day = date.today() - timedelta(days=6)
+
+    imagery({
+        "l5": {"day": cd.same_season(2010, after_day), "cloudy": False, "platform": "landsat-5"},
+        "l9": {"day": after_day, "cloudy": False,
+               "platform": "landsat-9", "cleared": "all"},
+    })
+
+    deepseek(planner_reply("construction_progress",
+                           time_range={"start": "2010", "as_stated": "since 2010"}))
+
+    body = client.post("/analyze", json={"query": "What changed since 2010?"}).json()
+
+    assert body["status"] == "success"
+
+    meta = body["change_detection"]
+
+    assert meta["sensor"] == "Landsat"
+    assert meta["resolution_m"] == 30
+
+    change = body["top_prospects"][0]
+
+    item = change["criteria"]["change_magnitude"]["evidence_items"][0]
+
+    assert item["source_id"] == "landsat_c2_l2_planetary_computer"
+    assert item["source"] == "Microsoft Planetary Computer (Landsat)"
+    assert "pixels at 30 m" in change["criteria"]["changed_area"]["evidence"]
+
+
+def test_landsat_7_last_resort_is_stated_in_limitations(client, deepseek, imagery):
+
+    imagery({
+        "l7": {"day": date(2012, 1, 2), "cloudy": False, "platform": "landsat-7"},
+        "l8": {"day": date.today() - timedelta(days=6), "cloudy": False, "platform": "landsat-8"},
+    })
+
+    deepseek(planner_reply("construction_progress", time_range={"start": "2012-01-01"}))
+
+    body = client.post("/analyze", json={"query": "What changed since 2012?"}).json()
+
+    assert body["change_detection"]["before"]["last_resort"] is True
+    assert any("Landsat 7 image" in l for l in body["limitations"])
+    assert any(l.startswith("Compared Landsat images (30 m)") for l in body["limitations"])

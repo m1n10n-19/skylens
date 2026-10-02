@@ -251,6 +251,19 @@ def _stated_date(value, end=False):
         return None
 
 
+def _precision(value):
+    """
+    "year", "month" or "day" for a stated "YYYY[-MM[-DD]]".
+    """
+
+    match = _DATE.match(str(value))
+
+    if not match:
+        return None
+
+    return "day" if match.group(3) else "month" if match.group(2) else "year"
+
+
 def _years_ago(today, years):
 
     try:
@@ -278,6 +291,8 @@ def parse_time_range(raw, today=None):
 
     start = _stated_date(raw.get("start"))
 
+    precision = _precision(raw.get("start")) if start else None
+
     end = _stated_date(raw.get("end"), end=True)
 
     years = _as_float(raw.get("years_back"))
@@ -286,9 +301,11 @@ def parse_time_range(raw, today=None):
 
     if start is None and years:
         start = _years_ago(today, int(round(years)))
+        precision = "day"
 
     if start is None and months:
         start = today - timedelta(days=round(months * 30.44))
+        precision = "day"
 
     if end and end > today:
         end = today
@@ -297,6 +314,8 @@ def parse_time_range(raw, today=None):
         return result
 
     result.start = start.isoformat() if start else None
+
+    result.start_precision = precision if start else None
 
     result.end = end.isoformat() if end else None
 
@@ -333,6 +352,11 @@ class TimeRange(BaseModel):
 
     # What the user said, e.g. "since 2019"
     as_stated: Optional[str] = None
+
+    # How precisely the start was stated: "year" ("since 2019"),
+    # "month" ("since June 2019") or "day". A year-only start leaves
+    # the time of year open, so change detection can match seasons.
+    start_precision: Optional[str] = None
 
 
 class AnalysisSpec(BaseModel):

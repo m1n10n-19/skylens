@@ -103,7 +103,7 @@ VERIFY = {
         "Cause of the change",
         "What actually changed on the ground: construction, clearing, farming or flooding?",
         "imagery_review",
-        "10 m spectral change cannot tell these causes apart.",
+        "Spectral change at satellite resolution cannot tell these causes apart.",
     ),
     "footprint_size": (
         "Usable roof area",

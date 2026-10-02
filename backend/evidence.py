@@ -242,13 +242,17 @@ MEASUREMENTS = {
 
 def _source_fields(layer_id, provenance):
 
-    source = data_registry.resolve(layer_id)
-
     provenance = provenance or {}
+
+    # A layer can be supplied by more than one source (historical
+    # imagery: Sentinel-2 or Landsat); provenance names the one used.
+    used = data_registry.SOURCES.get(provenance.get("source_id"))
+
+    source = used or data_registry.resolve(layer_id)
 
     return {
         "layer": layer_id,
-        "source": data_registry.source_label(layer_id),
+        "source": used.name if used else data_registry.source_label(layer_id),
         "source_id": source.id if source else None,
         "observed_at": provenance.get("observed_at"),
         "data_as_of": provenance.get("data_as_of"),

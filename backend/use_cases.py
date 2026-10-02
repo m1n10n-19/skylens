@@ -675,8 +675,9 @@ CONSTRUCTION_PROGRESS = UseCase(
     description=(
         "Find where land changed in an area between two dates: "
         "construction or clearing, vegetation loss or gain, water "
-        "appearing or receding. Compares Sentinel-2 satellite "
-        "imagery (10 m). Default period: the last 12 months."
+        "appearing or receding. Compares satellite imagery: "
+        "Sentinel-2 (10 m) from 2017, Landsat (30 m) for periods "
+        "back to 1984. Default period: the last 12 months."
     ),
 
     example_queries=(
@@ -730,7 +731,7 @@ CONSTRUCTION_PROGRESS = UseCase(
         "permits",
     ),
 
-    # 5 pixels at 10 m.
+    # 5 pixels at 10 m (Landsat's own 5-pixel minimum is larger).
     default_min_area_m2=500,
 
     output_format="change_report",
@@ -743,8 +744,8 @@ CONSTRUCTION_PROGRESS = UseCase(
     ),
 
     limitations=(
-        "Sentinel-2 pixels are 10 m: changes smaller than about "
-        "500 m² are not detected.",
+        "Changes smaller than about 500 m² (Sentinel-2, 10 m) or "
+        "4,500 m² (Landsat, 30 m, used before 2017) are not detected.",
 
         "Spectral change shows that a surface changed, not why: "
         "construction, clearing, farming and flooding can look alike.",

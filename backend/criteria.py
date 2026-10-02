@@ -745,7 +745,7 @@ def changed_area(candidate, context, spec):
 
     return {
         "score": score,
-        "evidence": f"{_area(area)} ({change['pixels']} pixels at 10 m)",
+        "evidence": f"{_area(area)} ({change['pixels']} pixels at {change.get('resolution_m', 10)} m)",
         "reasons": [f"{_area(area)} changed"] if area >= 5000 else [],
         "measurements": {"changed_area_m2": area},
     }

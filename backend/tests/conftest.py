@@ -301,21 +301,56 @@ class FakeAsset:
         self.href = href
 
 
+SENTINEL_ASSETS = ("B03", "B04", "B08", "B11", "SCL")
+
+LANDSAT_ASSETS = ("green", "red", "nir08", "swir16", "qa_pixel")
+
+
 class FakeItem:
 
-    def __init__(self, scene_id, day, cloud=5.0, baseline="05.11"):
+    def __init__(self, scene_id, day, cloud=5.0, baseline="05.11", platform="sentinel-2a"):
         self.id = scene_id
         self.datetime = datetime(day.year, day.month, day.day, 5, tzinfo=timezone.utc)
-        self.properties = {"eo:cloud_cover": cloud, "s2:processing_baseline": baseline}
-        self.assets = {b: FakeAsset(f"{scene_id}/{b}") for b in ("B03", "B04", "B08", "B11", "SCL")}
+        self.properties = {"eo:cloud_cover": cloud, "s2:processing_baseline": baseline,
+                           "platform": platform}
+        names = LANDSAT_ASSETS if platform.startswith("landsat") else SENTINEL_ASSETS
+        self.assets = {b: FakeAsset(f"{scene_id}/{b}") for b in names}
+
+
+# Surface reflectance by band role: dense vegetation and bare ground.
+VEGETATION = {"green": 0.05, "red": 0.04, "nir": 0.40, "swir": 0.15}
+
+BARE = {"green": 0.12, "red": 0.16, "nir": 0.20, "swir": 0.32}
+
+ROLE = {"B03": "green", "B04": "red", "B08": "nir", "B11": "swir",
+        "green": "green", "red": "red", "nir08": "nir", "swir16": "swir"}
+
+
+def _dn(reflectance, landsat):
+    """
+    Digital number for a reflectance: Landsat C2 L2 scaling, or
+    Sentinel-2 with the 1000 offset of baseline 05.11.
+    """
+
+    if landsat:
+        return int(round((reflectance + 0.2) / 0.0000275))
+
+    return int(round(reflectance * 10000 + 1000))
 
 
 class FakeImagery:
     """
-    search(bbox, start, end) and reader(href, grid) over scenes defined
-    as {scene_id: {"day": date, "cloudy": bool, "cleared": bool | "all"}}.
+    search(bbox, start, end, collection) and reader(href, grid) over
+    scenes defined as
+
+        {scene_id: {"day": date, "cloudy": bool, "cleared": bool | "all",
+                    "platform": "sentinel-2a" | "landsat-5" | ...,
+                    "covers": None | "west" | "east"}}
+
     "cleared" scenes have bare ground in the north-west quarter of the
-    grid ("all": the whole grid) where the others have dense vegetation.
+    grid ("all": the whole grid) where the others have dense
+    vegetation. "covers" limits a tile to one half of the grid (the
+    rest is outside its footprint: no data).
     """
 
     def __init__(self, scenes):
@@ -323,26 +358,47 @@ class FakeImagery:
         self.reads = []
         self.searches = []
 
-    def search(self, bbox, start, end):
+    def search(self, bbox, start, end, collection="sentinel-2-l2a"):
         self.searches.append((start, end))
-        return [FakeItem(sid, s["day"]) for sid, s in self.scenes.items() if start <= s["day"] <= end]
+        landsat = collection.startswith("landsat")
+        return [
+            FakeItem(sid, s["day"], platform=s.get("platform", "sentinel-2a"))
+            for sid, s in self.scenes.items()
+            if start <= s["day"] <= end
+            and s.get("platform", "sentinel-2a").startswith("landsat") == landsat
+        ]
 
     def reader(self, href, grid):
         scene_id, band = href.split("/")
         self.reads.append(href)
         scene = self.scenes[scene_id]
+        landsat = scene.get("platform", "sentinel-2a").startswith("landsat")
         h, w = grid.height, grid.width
-        if band == "SCL":
-            return np.full((h, w), 9 if scene["cloudy"] else 4, dtype="uint8")
-        # DN with the 1000 offset (baseline 05.11): dense vegetation.
-        value = {"B03": 1500, "B04": 1400, "B08": 5000, "B11": 2500}[band]
-        out = np.full((h, w), value, dtype="uint16")
-        if scene.get("cleared"):
-            bare = {"B03": 2200, "B04": 2600, "B08": 3000, "B11": 4200}[band]
-            if scene["cleared"] == "all":
-                out[:, :] = bare
+
+        if band in ("SCL", "qa_pixel"):
+            if landsat:
+                # QA_PIXEL: bit 6 clear, bit 3 cloud; 1 = fill.
+                out = np.full((h, w), 8 if scene["cloudy"] else 64, dtype="uint16")
             else:
-                out[: h // 2, : w // 2] = bare
+                out = np.full((h, w), 9 if scene["cloudy"] else 4, dtype="uint8")
+            nodata = 1 if landsat else 0
+        else:
+            role = ROLE[band]
+            out = np.full((h, w), _dn(VEGETATION[role], landsat), dtype="uint16")
+            if scene.get("cleared"):
+                bare = _dn(BARE[role], landsat)
+                if scene["cleared"] == "all":
+                    out[:, :] = bare
+                else:
+                    out[: h // 2, : w // 2] = bare
+            nodata = 0
+
+        covers = scene.get("covers")
+        if covers == "west":
+            out[:, w // 2:] = nodata
+        elif covers == "east":
+            out[:, : w // 2] = nodata
+
         return out
 
 

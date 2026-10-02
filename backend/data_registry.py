@@ -74,6 +74,10 @@ class DataLayer:
     # the source, e.g. land-use tags rather than parcels.
     source_note: Optional[str] = None
 
+    # Further sources that can supply the layer; the one actually used
+    # is recorded in each result's provenance.
+    other_sources: tuple = ()
+
     limitations: tuple = ()
 
 
@@ -145,6 +149,36 @@ SENTINEL_2_PC = DataSource(
 )
 
 
+LANDSAT_PC = DataSource(
+
+    id="landsat_c2_l2_planetary_computer",
+
+    name="Microsoft Planetary Computer (Landsat)",
+
+    provider="USGS Landsat Collection 2 Level-2 (Landsat 5, 7, 8, 9), via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="30 m",
+
+    temporal_resolution="About 16-day revisit per satellite",
+
+    coverage="Global land, 1984 onwards",
+
+    freshness="Used for comparisons that reach back before 2017",
+
+    cost="free",
+
+    latency="A few seconds (catalogue search)",
+
+    license="USGS public domain",
+
+    limitations=(
+        "30 m pixels: changes under about 4,500 m² are not detected.",
+        "Landsat 7 images after May 2003 have permanent data gaps; used only when no other image is clear.",
+        "Small calibration differences between Landsat 5, 7, 8 and 9 sensors.",
+    ),
+)
+
+
 SOURCES = {
 
     source.id: source
@@ -152,6 +186,7 @@ SOURCES = {
     for source in (
         OSM_OVERPASS,
         SENTINEL_2_PC,
+        LANDSAT_PC,
     )
 }
 
@@ -276,6 +311,7 @@ _LAYERS = (
         id="historical_imagery",
         label="Historical imagery comparison",
         source="sentinel_2_planetary_computer",
+        other_sources=("landsat_c2_l2_planetary_computer",),
         capabilities=(
             "historical_change",
             "vegetation_change",
@@ -283,9 +319,10 @@ _LAYERS = (
             "water_change",
         ),
         limitations=(
-            "Two-date spectral comparison at 10 m; changes under about 500 m² are not detected.",
+            "Two-date spectral comparison: Sentinel-2 at 10 m (2017 onwards) or, for "
+            "earlier periods, Landsat at 30 m (1984 onwards).",
+            "Changes under about 500 m² (Sentinel-2) or 4,500 m² (Landsat) are not detected.",
             "Shows that a surface changed, not why: construction, clearing, farming and flooding can look alike.",
-            "Imagery starts in 2017 (Sentinel-2 L2A).",
         ),
     ),
 
@@ -410,6 +447,10 @@ def describe_layer(layer_id):
         "capabilities": list(layer.capabilities),
         "limitations": list(layer.limitations),
         "source": describe_source(source) if source else None,
+        "other_sources": [
+            describe_source(SOURCES[s]) for s in layer.other_sources
+            if SOURCES[s].available
+        ],
     }
 
 

@@ -409,6 +409,7 @@ def _recent_change(use_case, spec, context, top, originals, emit):
             geometries,
             before_date=date.fromisoformat(time_range.start) if time_range.start else None,
             after_date=date.fromisoformat(time_range.end) if time_range.end else None,
+            match_season=time_range.start_precision == "year",
         )
 
     except change_detection.ChangeDataUnavailable as e:
@@ -442,6 +443,7 @@ def _recent_change(use_case, spec, context, top, originals, emit):
     context.layer_status["historical_imagery"] = "loaded"
 
     context.layer_provenance["historical_imagery"] = {
+        "source_id": scenes["source"],
         "observed_at": scenes["after"]["acquired_at"],
         "data_as_of": None,
         "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -772,11 +774,21 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
     change_meta = context.meta.get("change_detection")
 
     if change_meta:
+
+        before, after = change_meta["before"], change_meta["after"]
+
         limitations.insert(1, (
-            f"Compared Sentinel-2 scenes from {change_meta['before']['date']} and "
-            f"{change_meta['after']['date']} ({change_meta['season_gap_days']} days "
-            f"apart in the year)."
+            f"Compared {change_meta['sensor']} images ({change_meta['resolution_m']} m) "
+            f"from {before['date']} and {after['date']} "
+            f"({change_meta['season_gap_days']} days apart in the year)."
         ))
+
+        if before.get("last_resort") or after.get("last_resort"):
+            limitations.insert(2, (
+                "A Landsat 7 image from after May 2003 was used because no other "
+                "clear image existed; its permanent striped data gaps count as "
+                "missing data, not as change."
+            ))
 
     # Map data failures abort the analysis (502), so imagery is the
     # only layer that can be missing from a successful report.
