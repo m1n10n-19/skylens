@@ -8,11 +8,14 @@ SkyLens actually has, and returns:
         "score": 0-100,
         "evidence": "what was measured",
         "reasons": ["short human-readable reason", ...],
-        "measurements": {"plain_value": 123, ...}   # optional
+        "measurements": {"plain_value": 123, ...}
     }
 
 or None when the evidence cannot be measured for this candidate.
 Evaluators never invent values.
+
+Every measurement key must be listed in evidence.MEASUREMENTS, which
+gives its unit, claim and status for the evidence records.
 
 Signature: evaluator(candidate, context, spec) -> dict | None
 """
@@ -95,6 +98,7 @@ def solar_footprint_size(candidate, context, spec):
         "score": points / 70 * 100,
         "evidence": f"Footprint {_area(area)}",
         "reasons": reasons,
+        "measurements": {"footprint_area_m2": area},
     }
 
 
@@ -134,6 +138,7 @@ def solar_building_type(candidate, context, spec):
         "score": points / 30 * 100,
         "evidence": f"OSM building tag: {building_type}",
         "reasons": [reason],
+        "measurements": {"building_type_tag": building_type},
     }
 
 
@@ -188,7 +193,12 @@ def size_fit(candidate, context, spec):
         else:
             reasons = [f"Larger than needed ({r:.1f}x the requested size)"]
 
-        return {"score": score, "evidence": evidence, "reasons": reasons}
+        return {
+            "score": score,
+            "evidence": evidence,
+            "reasons": reasons,
+            "measurements": {"site_area_m2": area},
+        }
 
     if minimum:
 
@@ -209,6 +219,7 @@ def size_fit(candidate, context, spec):
             "score": score,
             "evidence": f"{_area(area)} vs minimum {_area(minimum)}",
             "reasons": reasons,
+            "measurements": {"site_area_m2": area},
         }
 
     # No size requested: medium-sized sites are the safe default.
@@ -218,6 +229,7 @@ def size_fit(candidate, context, spec):
         "score": max(score, 20),
         "evidence": f"{_area(area)} (no size requested)",
         "reasons": [],
+        "measurements": {"site_area_m2": area},
     }
 
 
@@ -239,6 +251,7 @@ def parcel_size(candidate, context, spec):
             "score": max(score, 10),
             "evidence": f"{_area(area)} (no minimum requested)",
             "reasons": [f"{_area(area)} parcel"],
+            "measurements": {"site_area_m2": area},
         }
 
     if area < minimum:
@@ -246,6 +259,7 @@ def parcel_size(candidate, context, spec):
             "score": 20,
             "evidence": f"{_area(area)} vs minimum {_area(minimum)}",
             "reasons": [f"Below the requested minimum of {_area(minimum)}"],
+            "measurements": {"site_area_m2": area},
         }
 
     score = 60 + 40 * min(1, math.log(area / minimum) / math.log(4))
@@ -256,6 +270,7 @@ def parcel_size(candidate, context, spec):
         "reasons": [
             f"{_area(area)} parcel, {area / minimum:.1f}x the requested minimum"
         ],
+        "measurements": {"site_area_m2": area},
     }
 
 

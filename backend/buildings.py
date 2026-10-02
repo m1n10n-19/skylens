@@ -4,10 +4,19 @@ from shapely.geometry import Polygon
 
 from geodata import bbox_around
 
-from overpass import query_overpass
+from overpass import provenance, query_overpass
 
 
-def get_buildings(
+def get_buildings(*args, **kwargs):
+    """
+    OSM building footprints around a location, largest first.
+    See get_buildings_with_provenance() for the arguments.
+    """
+
+    return get_buildings_with_provenance(*args, **kwargs)[0]
+
+
+def get_buildings_with_provenance(
     latitude: float,
     longitude: float,
     radius_km: float = 1,
@@ -16,7 +25,9 @@ def get_buildings(
     area_filters=None
 ):
     """
-    OSM building footprints around a location, largest first.
+    (candidates, provenance): OSM building footprints around a
+    location, largest first, and when the map data is from
+    (overpass.provenance).
 
     include_geometry adds an internal "_polygon" (lon/lat shapely
     polygon) used by the analysis pipeline to draw footprints.
@@ -128,4 +139,4 @@ def get_buildings(
         reverse=True
     )
 
-    return candidates
+    return candidates, provenance(data)

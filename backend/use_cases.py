@@ -16,107 +16,23 @@ name from a Criterion.
 from dataclasses import dataclass
 from typing import Optional
 
+import data_registry
+
 
 # ============================================================
 # DATA LAYERS
 # ============================================================
 
+# Layers, their sources and metadata live in data_registry.py.
+# This is the original {layer_id: {"label", "source", "available"}}
+# view of it, kept for existing callers. It is built once at import;
+# use data_layer_available() / data_registry for live availability.
+#
 # "available" means SkyLens has a working provider today.
 # Unavailable layers are listed so that criteria depending on them
 # are reported as missing evidence instead of being fabricated.
 
-DATA_LAYERS = {
-
-    "satellite_imagery": {
-        "label": "Satellite imagery (Sentinel-2, 10 m)",
-        "source": "Microsoft Planetary Computer",
-        "available": True,
-    },
-
-    "building_footprints": {
-        "label": "Building footprints",
-        "source": "OpenStreetMap (Overpass)",
-        "available": True,
-    },
-
-    "land_parcels": {
-        "label": "Open / vacant land polygons",
-        "source": "OpenStreetMap land-use tags (not cadastral parcels)",
-        "available": True,
-    },
-
-    "roads": {
-        "label": "Road network",
-        "source": "OpenStreetMap (Overpass)",
-        "available": True,
-    },
-
-    "points_of_interest": {
-        "label": "Shops, offices and amenities",
-        "source": "OpenStreetMap (Overpass)",
-        "available": True,
-    },
-
-    "ev_chargers": {
-        "label": "Existing EV charging stations",
-        "source": "OpenStreetMap (Overpass)",
-        "available": True,
-    },
-
-    "parking": {
-        "label": "Mapped parking areas",
-        "source": "OpenStreetMap (Overpass)",
-        "available": True,
-    },
-
-    "flood_risk": {
-        "label": "Flood risk",
-        "source": None,
-        "available": False,
-    },
-
-    "population": {
-        "label": "Population / footfall",
-        "source": None,
-        "available": False,
-    },
-
-    "zoning": {
-        "label": "Zoning / permitted land use",
-        "source": None,
-        "available": False,
-    },
-
-    "ownership": {
-        "label": "Ownership / title records",
-        "source": None,
-        "available": False,
-    },
-
-    "solar_irradiance": {
-        "label": "Rooftop solar irradiance",
-        "source": None,
-        "available": False,
-    },
-
-    "shading": {
-        "label": "Roof shading analysis",
-        "source": None,
-        "available": False,
-    },
-
-    "historical_imagery": {
-        "label": "Historical imagery comparison",
-        "source": None,
-        "available": False,
-    },
-
-    "site_registry": {
-        "label": "Customer's registered sites",
-        "source": None,
-        "available": False,
-    },
-}
+DATA_LAYERS = data_registry.legacy_data_layers()
 
 
 # ============================================================
@@ -842,9 +758,7 @@ def resolve_use_case(intent_type):
 
 def data_layer_available(layer_id):
 
-    return bool(
-        DATA_LAYERS.get(layer_id, {}).get("available")
-    )
+    return data_registry.is_available(layer_id)
 
 
 def describe_use_case(use_case):
@@ -866,12 +780,10 @@ def describe_use_case(use_case):
 
         "candidate_type": use_case.candidate_type,
 
+        # id, label and available, plus the layer's capabilities,
+        # limitations and source metadata from the data registry.
         "data_layers": [
-            {
-                "id": layer,
-                "label": DATA_LAYERS.get(layer, {}).get("label", layer),
-                "available": data_layer_available(layer),
-            }
+            data_registry.describe_layer(layer)
             for layer in use_case.data_layers
         ],
 

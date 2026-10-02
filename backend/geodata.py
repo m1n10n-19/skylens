@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from shapely.geometry import LineString, Point, Polygon, mapping
 from shapely.ops import transform
 
+from overpass import provenance as _provenance
 from overpass import query_overpass as _query_overpass
 
 
@@ -329,6 +330,9 @@ class Context:
     # layer id -> "loaded" for every layer that was fetched
     layer_status: dict = field(default_factory=dict)
 
+    # layer id -> {"data_as_of", "retrieved_at"} (overpass.provenance)
+    layer_provenance: dict = field(default_factory=dict)
+
     def has_layer(self, layer_id):
 
         return self.layer_status.get(layer_id) == "loaded"
@@ -532,6 +536,10 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
 
     for layer in layers:
         context.layer_status[layer] = "loaded"
+
+    # Candidates and context come from the same response.
+    for layer in context.layer_status:
+        context.layer_provenance[layer] = _provenance(data)
 
     ordered = sorted(
         candidates.values(),

@@ -8,7 +8,11 @@ AnalysisSpec + UseCase
 
 from fastapi import HTTPException
 
-from buildings import get_buildings
+import data_registry
+
+from assessment import assess
+
+from buildings import get_buildings_with_provenance
 
 from geodata import (
     CONTEXT_LAYERS,
@@ -25,7 +29,6 @@ import search_area
 from scoring import score_candidate
 
 from use_cases import (
-    DATA_LAYERS,
     USE_CASES,
     data_layer_available,
     describe_use_case,
@@ -93,7 +96,7 @@ def unsupported_response(query, intent, spec):
 def not_implemented_response(query, intent, spec, use_case):
 
     missing_layers = [
-        DATA_LAYERS[layer]["label"]
+        data_registry.layer_label(layer)
         for layer in use_case.data_layers
         if not data_layer_available(layer)
     ]
@@ -226,7 +229,7 @@ def _candidates(use_case, area, minimum, maximum, place):
 
         if source == "buildings":
 
-            candidates = get_buildings(
+            candidates, provenance = get_buildings_with_provenance(
                 latitude=area.latitude,
                 longitude=area.longitude,
                 radius_km=area.reach_km,
@@ -244,6 +247,8 @@ def _candidates(use_case, area, minimum, maximum, place):
             context = new_context(area.latitude, area.longitude, area.reach_km, place)
 
             context.layer_status["building_footprints"] = "loaded"
+
+            context.layer_provenance["building_footprints"] = provenance
 
         else:
 
@@ -285,8 +290,6 @@ def _evidence(use_case, context, satellite_status):
 
     for layer in use_case.data_layers:
 
-        info = DATA_LAYERS.get(layer, {"label": layer})
-
         if layer == "satellite_imagery":
             status = satellite_status
         elif not data_layer_available(layer):
@@ -305,8 +308,8 @@ def _evidence(use_case, context, satellite_status):
 
         entry = {
             "id": layer,
-            "label": info.get("label", layer),
-            "source": info.get("source"),
+            "label": data_registry.layer_label(layer),
+            "source": data_registry.source_label(layer),
             "status": state,
         }
 
@@ -316,6 +319,45 @@ def _evidence(use_case, context, satellite_status):
         evidence.append(entry)
 
     return evidence
+
+
+def _completeness(use_case, area, context, satellite_status):
+    """
+    Whether the analysis ran everything it planned with the providers
+    SkyLens has. Layers with no provider at all do not make a result
+    partial (they are reported in missing_data); failures, skipped
+    layers and partially searched places do.
+    """
+
+    reasons = []
+
+    if satellite_status != "loaded":
+        detail = satellite_status.removeprefix("failed: ")
+        reasons.append(f"Satellite imagery could not be retrieved ({detail}).")
+
+    skipped = sorted({
+        c.data_layer
+        for c in use_case.criteria
+        if c.evaluator
+        and data_registry.is_available(c.data_layer)
+        and not context.has_layer(c.data_layer)
+    })
+
+    for layer in skipped:
+        reasons.append(
+            f"Not loaded for this analysis: {data_registry.layer_label(layer)}."
+        )
+
+    if area.place_area_km2:
+        reasons.append(
+            f"Only part of {area.name} was searched "
+            f"({area.area_km2:,.0f} of about {area.place_area_km2:,.0f} km²)."
+        )
+
+    return {
+        "status": "partial" if reasons else "complete",
+        "reasons": reasons,
+    }
 
 
 def _decision(use_case, scored, top):
@@ -515,6 +557,9 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
         candidate["nearby"] = nearby_features(context, original)
 
+        # Known / unknown / what to verify, from the evidence above.
+        candidate["assessment"] = assess(candidate, use_case)
+
     step("scoring", "done", ranked=len(top))
 
     print("STEP 6 COMPLETE")
@@ -603,4 +648,6 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         "missing_data": missing_data,
 
         "limitations": limitations,
+
+        "completeness": _completeness(use_case, area, context, satellite_status),
     }

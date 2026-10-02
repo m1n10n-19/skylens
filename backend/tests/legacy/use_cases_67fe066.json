@@ -1,0 +1,455 @@
+{
+  "_note": "Frozen from commit 67fe066 before the data registry. Do not edit.",
+  "data_layers": {
+    "satellite_imagery": {
+      "label": "Satellite imagery (Sentinel-2, 10 m)",
+      "source": "Microsoft Planetary Computer",
+      "available": true
+    },
+    "building_footprints": {
+      "label": "Building footprints",
+      "source": "OpenStreetMap (Overpass)",
+      "available": true
+    },
+    "land_parcels": {
+      "label": "Open / vacant land polygons",
+      "source": "OpenStreetMap land-use tags (not cadastral parcels)",
+      "available": true
+    },
+    "roads": {
+      "label": "Road network",
+      "source": "OpenStreetMap (Overpass)",
+      "available": true
+    },
+    "points_of_interest": {
+      "label": "Shops, offices and amenities",
+      "source": "OpenStreetMap (Overpass)",
+      "available": true
+    },
+    "ev_chargers": {
+      "label": "Existing EV charging stations",
+      "source": "OpenStreetMap (Overpass)",
+      "available": true
+    },
+    "parking": {
+      "label": "Mapped parking areas",
+      "source": "OpenStreetMap (Overpass)",
+      "available": true
+    },
+    "flood_risk": {
+      "label": "Flood risk",
+      "source": null,
+      "available": false
+    },
+    "population": {
+      "label": "Population / footfall",
+      "source": null,
+      "available": false
+    },
+    "zoning": {
+      "label": "Zoning / permitted land use",
+      "source": null,
+      "available": false
+    },
+    "ownership": {
+      "label": "Ownership / title records",
+      "source": null,
+      "available": false
+    },
+    "solar_irradiance": {
+      "label": "Rooftop solar irradiance",
+      "source": null,
+      "available": false
+    },
+    "shading": {
+      "label": "Roof shading analysis",
+      "source": null,
+      "available": false
+    },
+    "historical_imagery": {
+      "label": "Historical imagery comparison",
+      "source": null,
+      "available": false
+    },
+    "site_registry": {
+      "label": "Customer's registered sites",
+      "source": null,
+      "available": false
+    }
+  },
+  "use_cases": [
+    {
+      "id": "solar_prospecting",
+      "title": "Solar prospecting",
+      "purpose": "solar prospecting",
+      "description": "Find rooftops (buildings) that could host solar panels.",
+      "implemented": true,
+      "candidate_type": "building",
+      "data_layers": [
+        {
+          "id": "satellite_imagery",
+          "label": "Satellite imagery (Sentinel-2, 10 m)",
+          "available": true
+        },
+        {
+          "id": "building_footprints",
+          "label": "Building footprints",
+          "available": true
+        }
+      ],
+      "criteria": [
+        {
+          "id": "footprint_size",
+          "label": "Building footprint size",
+          "weight": 0.35,
+          "measured": true
+        },
+        {
+          "id": "building_type",
+          "label": "Building type",
+          "weight": 0.15,
+          "measured": true
+        },
+        {
+          "id": "solar_suitability",
+          "label": "Solar irradiance / roof suitability",
+          "weight": 0.2,
+          "measured": false
+        },
+        {
+          "id": "shading",
+          "label": "Shading",
+          "weight": 0.15,
+          "measured": false
+        },
+        {
+          "id": "accessibility",
+          "label": "Site accessibility",
+          "weight": 0.15,
+          "measured": false
+        }
+      ],
+      "constraints": [
+        "Building footprint is used as a proxy for roof area."
+      ],
+      "output_format": "ranked_solar_prospects"
+    },
+    {
+      "id": "ev_charging_site_selection",
+      "title": "EV charging site selection",
+      "purpose": "an EV charging station",
+      "description": "Find land or sites for an electric-vehicle charging station: accessible, near demand, not over-served.",
+      "implemented": true,
+      "candidate_type": "land_parcel",
+      "data_layers": [
+        {
+          "id": "satellite_imagery",
+          "label": "Satellite imagery (Sentinel-2, 10 m)",
+          "available": true
+        },
+        {
+          "id": "land_parcels",
+          "label": "Open / vacant land polygons",
+          "available": true
+        },
+        {
+          "id": "roads",
+          "label": "Road network",
+          "available": true
+        },
+        {
+          "id": "points_of_interest",
+          "label": "Shops, offices and amenities",
+          "available": true
+        },
+        {
+          "id": "ev_chargers",
+          "label": "Existing EV charging stations",
+          "available": true
+        },
+        {
+          "id": "flood_risk",
+          "label": "Flood risk",
+          "available": false
+        }
+      ],
+      "criteria": [
+        {
+          "id": "parcel_size_fit",
+          "label": "Parcel size fit",
+          "weight": 0.2,
+          "measured": true
+        },
+        {
+          "id": "road_access",
+          "label": "Road access",
+          "weight": 0.15,
+          "measured": true
+        },
+        {
+          "id": "vacancy",
+          "label": "Vacancy evidence",
+          "weight": 0.1,
+          "measured": true
+        },
+        {
+          "id": "major_road_proximity",
+          "label": "Proximity to major roads",
+          "weight": 0.05,
+          "measured": true
+        },
+        {
+          "id": "demand_potential",
+          "label": "Demand potential (dwell-time destinations)",
+          "weight": 0.15,
+          "measured": true
+        },
+        {
+          "id": "commercial_activity",
+          "label": "Commercial activity",
+          "weight": 0.05,
+          "measured": true
+        },
+        {
+          "id": "competition",
+          "label": "Competition (existing chargers)",
+          "weight": 0.15,
+          "measured": true
+        },
+        {
+          "id": "flood_risk",
+          "label": "Flood risk",
+          "weight": 0.15,
+          "measured": false
+        }
+      ],
+      "constraints": [
+        "Site should be vacant land.",
+        "Vehicle access from a public road."
+      ],
+      "output_format": "ranked_ev_charging_sites"
+    },
+    {
+      "id": "commercial_site_selection",
+      "title": "Commercial site selection",
+      "purpose": "commercial site selection",
+      "description": "Find a site for a business (shop, restaurant, food court, showroom, office, clinic, gym...).",
+      "implemented": true,
+      "candidate_type": "site",
+      "data_layers": [
+        {
+          "id": "satellite_imagery",
+          "label": "Satellite imagery (Sentinel-2, 10 m)",
+          "available": true
+        },
+        {
+          "id": "land_parcels",
+          "label": "Open / vacant land polygons",
+          "available": true
+        },
+        {
+          "id": "building_footprints",
+          "label": "Building footprints",
+          "available": true
+        },
+        {
+          "id": "roads",
+          "label": "Road network",
+          "available": true
+        },
+        {
+          "id": "points_of_interest",
+          "label": "Shops, offices and amenities",
+          "available": true
+        },
+        {
+          "id": "parking",
+          "label": "Mapped parking areas",
+          "available": true
+        },
+        {
+          "id": "population",
+          "label": "Population / footfall",
+          "available": false
+        }
+      ],
+      "criteria": [
+        {
+          "id": "site_size_fit",
+          "label": "Site size fit",
+          "weight": 0.2,
+          "measured": true
+        },
+        {
+          "id": "road_access",
+          "label": "Road access",
+          "weight": 0.15,
+          "measured": true
+        },
+        {
+          "id": "major_road_proximity",
+          "label": "Proximity to major roads",
+          "weight": 0.1,
+          "measured": true
+        },
+        {
+          "id": "commercial_activity",
+          "label": "Surrounding commercial activity",
+          "weight": 0.2,
+          "measured": true
+        },
+        {
+          "id": "parking_potential",
+          "label": "Parking potential",
+          "weight": 0.1,
+          "measured": true
+        },
+        {
+          "id": "competition",
+          "label": "Competition (similar businesses nearby)",
+          "weight": 0.1,
+          "measured": true
+        },
+        {
+          "id": "population",
+          "label": "Surrounding population / footfall",
+          "weight": 0.15,
+          "measured": false
+        }
+      ],
+      "constraints": [
+        "Site must fit the requested floor/land area."
+      ],
+      "output_format": "ranked_commercial_sites"
+    },
+    {
+      "id": "land_acquisition",
+      "title": "Land acquisition",
+      "purpose": "land acquisition",
+      "description": "Find vacant land to buy for development or investment.",
+      "implemented": true,
+      "candidate_type": "land_parcel",
+      "data_layers": [
+        {
+          "id": "satellite_imagery",
+          "label": "Satellite imagery (Sentinel-2, 10 m)",
+          "available": true
+        },
+        {
+          "id": "land_parcels",
+          "label": "Open / vacant land polygons",
+          "available": true
+        },
+        {
+          "id": "roads",
+          "label": "Road network",
+          "available": true
+        },
+        {
+          "id": "zoning",
+          "label": "Zoning / permitted land use",
+          "available": false
+        },
+        {
+          "id": "flood_risk",
+          "label": "Flood risk",
+          "available": false
+        },
+        {
+          "id": "ownership",
+          "label": "Ownership / title records",
+          "available": false
+        }
+      ],
+      "criteria": [
+        {
+          "id": "parcel_size",
+          "label": "Parcel size",
+          "weight": 0.25,
+          "measured": true
+        },
+        {
+          "id": "vacancy",
+          "label": "Vacancy evidence",
+          "weight": 0.15,
+          "measured": true
+        },
+        {
+          "id": "road_access",
+          "label": "Road access",
+          "weight": 0.2,
+          "measured": true
+        },
+        {
+          "id": "location",
+          "label": "Closeness to requested location",
+          "weight": 0.1,
+          "measured": true
+        },
+        {
+          "id": "land_use_compatibility",
+          "label": "Land-use compatibility (zoning)",
+          "weight": 0.15,
+          "measured": false
+        },
+        {
+          "id": "flood_risk",
+          "label": "Flood risk",
+          "weight": 0.15,
+          "measured": false
+        }
+      ],
+      "constraints": [
+        "Land should be vacant."
+      ],
+      "output_format": "ranked_land_parcels"
+    },
+    {
+      "id": "construction_progress",
+      "title": "Construction progress monitoring",
+      "purpose": "construction progress monitoring",
+      "description": "Detect how construction sites have changed between two dates using current vs historical imagery.",
+      "implemented": false,
+      "candidate_type": "construction_site",
+      "data_layers": [
+        {
+          "id": "site_registry",
+          "label": "Customer's registered sites",
+          "available": false
+        },
+        {
+          "id": "satellite_imagery",
+          "label": "Satellite imagery (Sentinel-2, 10 m)",
+          "available": true
+        },
+        {
+          "id": "historical_imagery",
+          "label": "Historical imagery comparison",
+          "available": false
+        }
+      ],
+      "criteria": [
+        {
+          "id": "change_magnitude",
+          "label": "Estimated change magnitude",
+          "weight": 0.5,
+          "measured": false
+        },
+        {
+          "id": "changed_area",
+          "label": "Changed area",
+          "weight": 0.3,
+          "measured": false
+        },
+        {
+          "id": "imagery_quality",
+          "label": "Imagery quality (cloud cover, date gap)",
+          "weight": 0.2,
+          "measured": false
+        }
+      ],
+      "constraints": [],
+      "output_format": "change_report"
+    }
+  ]
+}

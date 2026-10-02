@@ -30,6 +30,23 @@
       ],
       "port": 5501,
       "url": "http://127.0.0.1:5501"
+    },
+    {
+      "name": "app",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "main:app",
+        "--app-dir",
+        "backend",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000"
+      ],
+      "port": 8000,
+      "url": "http://127.0.0.1:8000"
     }
   ]
 }

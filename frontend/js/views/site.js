@@ -114,6 +114,7 @@
               <div class="card">
                 <div class="tabs" role="tablist">
                   <button role="tab" data-tab="overview" class="active">Overview</button>
+                  <button role="tab" data-tab="evidence">Evidence</button>
                   <button role="tab" data-tab="breakdown">Score breakdown</button>
                   <button role="tab" data-tab="nearby">Nearby context</button>
                 </div>
@@ -123,6 +124,12 @@
                 <h3>${recommended ? "Why this site is recommended" : `Why SkyLens ranked it #${rank}`}</h3>
                 <ul>${(c.reasons || []).map(x => `<li>${SL.esc(x)}</li>`).join("") || "<li>No specific reasons recorded.</li>"}</ul>
               </div>
+              ${SL.evidence.verifyHTML(c) ? `
+              <div class="card verify-card">
+                <h3>What to verify before committing</h3>
+                <p class="muted sm">Remote data can't settle these. Cheapest checks first; SkyLens doesn't carry them out.</p>
+                ${SL.evidence.verifyHTML(c)}
+              </div>` : ""}
               <div class="row-gap">
                 <a class="btn-outline" href="#/next/${id}">What next? ${SL.icon("arrowRight", 16)}</a>
                 <a class="btn-outline" href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}"
@@ -148,6 +155,7 @@
       const show = tab => {
         SL.$$(".tabs button", el).forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
         if (tab === "overview") body.innerHTML = SL.facts.rowsHTML(SL.facts.rows(c, r));
+        if (tab === "evidence") body.innerHTML = SL.evidence.html(c);
         if (tab === "breakdown") body.innerHTML = breakdownHTML(c);
         if (tab === "nearby") body.innerHTML = nearbyHTML(c, uc.title || "this analysis");
         if (tab === "nearby" && c.nearby) {

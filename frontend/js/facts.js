@@ -94,6 +94,127 @@
     return "Already searching the maximum 2 km radius.";
   };
 
+  // ---------------------------------------------------------- evidence
+
+  // Verification method types from the backend, cheapest first.
+  const METHODS = {
+    records_check: "Records check",
+    imagery_review: "Imagery review",
+    field_visit: "Site visit",
+    site_survey: "Specialist survey",
+  };
+
+  const BASIS = {
+    measured: ["Measured", "basis-measured", "Computed by SkyLens from mapped geometry"],
+    inferred: ["Inferred", "basis-inferred", "Derived from several observations"],
+    observed: ["Map tag · unverified", "basis-observed", "Read from an OpenStreetMap tag; not verified on imagery or the ground"],
+  };
+
+  const STATE = {
+    data_unavailable: "No data source",
+    not_implemented: "Not measured yet",
+    data_not_loaded: "Not loaded",
+    not_measurable: "Couldn't measure",
+    not_assessed: "Not assessed",
+  };
+
+  const day = iso => {
+    const d = new Date(iso);
+    return isNaN(d) ? null : d.toLocaleDateString("en-IN", {day: "numeric", month: "short", year: "numeric"});
+  };
+
+  // "OpenStreetMap (Overpass), data as of 30 Sep 2026" for one criterion.
+  function sourceLine(crit) {
+    const item = (crit.evidence_items || []).find(i => i.source);
+    if (!item) return "";
+    const asOf = item.data_as_of && day(item.data_as_of);
+    return SL.esc(item.source) + (asOf ? `, data as of ${asOf}` : "");
+  }
+
+  SL.evidence = {
+
+    has: candidate => !!(candidate && candidate.assessment),
+
+    basisBadge(basis) {
+      const [label, cls, title] = BASIS[basis] || BASIS.observed;
+      return `<span class="basis ${cls}" title="${SL.esc(title)}">${label}</span>`;
+    },
+
+    methodLabel: type => METHODS[type] || SL.cap(type),
+
+    // Known and unknown, for the site's Evidence tab.
+    html(candidate) {
+      if (!SL.evidence.has(candidate)) {
+        return `<p class="muted">Detailed evidence isn't available for this analysis.
+          Run the question again to see it.</p>`;
+      }
+      const a = candidate.assessment;
+      const crits = candidate.criteria || {};
+      return `
+        <div class="ev">
+          <h4>What SkyLens found <span class="muted sm">(${a.known.length})</span></h4>
+          ${a.known.length ? `<ul class="ev-list">${a.known.map(k => `
+            <li>
+              <div class="ev-top"><span>${SL.esc(k.label)}</span>${SL.evidence.basisBadge(k.basis)}</div>
+              <div class="ev-sub">${SL.esc(k.summary || "")}</div>
+              ${crits[k.id] && sourceLine(crits[k.id]) ? `<div class="ev-src">${sourceLine(crits[k.id])}</div>` : ""}
+            </li>`).join("")}</ul>` : `<p class="muted sm">Nothing could be measured for this site.</p>`}
+
+          <h4>What SkyLens doesn't know <span class="muted sm">(${a.unknown.length})</span></h4>
+          ${a.unknown.length ? `<ul class="ev-list ev-unknown">${a.unknown.map(u => `
+            <li>
+              <div class="ev-top"><span>${SL.esc(u.label)}</span><em>${SL.esc(STATE[u.state] || SL.cap(u.state))}</em></div>
+              <div class="ev-sub">${SL.esc(u.reason || "")}</div>
+            </li>`).join("")}</ul>` : `<p class="muted sm">Every criterion was measured.</p>`}
+
+          <p class="muted sm">Unknowns are left out of the score, never estimated.</p>
+        </div>`;
+    },
+
+    // The verify list for one site (already ordered cheapest first).
+    verifyHTML(candidate) {
+      const items = SL.evidence.has(candidate) ? candidate.assessment.verify : [];
+      if (!items.length) return "";
+      return `<ol class="verify">${items.map(v => `
+        <li>
+          <div class="v-q">${SL.esc(v.question)}</div>
+          <div class="v-meta"><span class="v-method">${SL.esc(SL.evidence.methodLabel(v.method_type))}</span>
+            ${SL.esc(v.why || "")}</div>
+        </li>`).join("")}</ol>`;
+    },
+
+    // Verify items across several sites, merged by id and ordered by
+    // method type (cheapest first): [{item, ranks: [1, 2]}].
+    mergedVerify(sites) {
+      const byId = new Map();
+      sites.forEach(c => {
+        if (!SL.evidence.has(c)) return;
+        c.assessment.verify.forEach(v => {
+          if (!byId.has(v.id)) byId.set(v.id, {item: v, ranks: []});
+          byId.get(v.id).ranks.push(c.rank);
+        });
+      });
+      const order = Object.keys(METHODS);
+      return Array.from(byId.values()).sort(
+        (a, b) => order.indexOf(a.item.method_type) - order.indexOf(b.item.method_type));
+    },
+
+    // Data dates per layer from the evidence items of these sites:
+    // {layer: {data_as_of, retrieved_at}}.
+    dates(sites) {
+      const out = {};
+      sites.forEach(c => Object.values(c.criteria || {}).forEach(crit =>
+        (crit.evidence_items || []).forEach(i => {
+          if (i.data_as_of || i.retrieved_at) {
+            out[i.layer] = {data_as_of: i.data_as_of, retrieved_at: i.retrieved_at};
+          }
+        })));
+      return out;
+    },
+
+    day,
+  };
+
   SL.facts = {
 
     level,

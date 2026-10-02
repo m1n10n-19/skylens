@@ -14,6 +14,9 @@
       const an = r.analysis || {};
       const loc = r.resolved_location;
       const date = new Date().toLocaleDateString("en-IN", {year: "numeric", month: "long", day: "numeric"});
+      const verify = SL.evidence.mergedVerify(top.slice(0, 3));
+      const dates = SL.evidence.dates(top);
+      const done = r.completeness;
 
       el.innerHTML = `
         <div class="report-bar no-print">
@@ -43,6 +46,8 @@
               ${SL.isNum(an.maximum_area_m2) ? " and ≤ " + SL.fmt(an.maximum_area_m2) + " m²" : ""}
               ${r.analysis_spec.area.as_stated ? ` (requested: ${SL.esc(r.analysis_spec.area.as_stated)})` : ""}</td></tr>
             <tr><th>Overall confidence</th><td>${SL.esc(SL.cap(r.decision.confidence))}</td></tr>
+            ${done ? `<tr><th>Completeness</th><td>${done.status === "partial"
+              ? `Partial: ${done.reasons.map(SL.esc).join(" ")}` : "Complete"}</td></tr>` : ""}
           </table>
 
           <h2>Method</h2>
@@ -78,9 +83,31 @@
               </div>
             </section>`).join("")}
 
+          ${verify.length ? `
+          <h2>What to verify next</h2>
+          <p>Remote data cannot settle these questions. They are ordered from the cheapest kind of
+            check to the most involved. SkyLens does not carry out these checks.</p>
+          <table class="rp-table">
+            <thead><tr><th>Question to resolve</th><th>Check</th><th>Why</th><th>Sites</th></tr></thead>
+            <tbody>${verify.map(({item, ranks}) => `<tr>
+              <td>${SL.esc(item.question)}</td>
+              <td>${SL.esc(SL.evidence.methodLabel(item.method_type))}</td>
+              <td>${SL.esc(item.why)}</td>
+              <td>${ranks.map(n => "#" + n).join(", ")}</td></tr>`).join("")}</tbody>
+          </table>` : ""}
+
           <h2>Data used</h2>
-          <ul>${(r.evidence || []).map(e => `<li>${SL.esc(e.label)}: ${SL.esc(e.status.replace(/_/g, " "))}
-            ${e.source ? ` (${SL.esc(e.source)})` : ""}</li>`).join("")}</ul>
+          <ul>${(r.evidence || []).map(e => {
+            const d = dates[e.id] || {};
+            const asOf = d.data_as_of && SL.evidence.day(d.data_as_of);
+            const got = d.retrieved_at && SL.evidence.day(d.retrieved_at);
+            return `<li>${SL.esc(e.label)}: ${SL.esc(e.status.replace(/_/g, " "))}` +
+              (e.source ? ` (${SL.esc(e.source)})` : "") +
+              (asOf ? `; data as of ${asOf}` : "") + (got ? `, retrieved ${got}` : "") + "</li>";
+          }).join("")}</ul>
+          ${r.satellite && r.satellite.date ? `<p class="sm rp-scene">Satellite scene ${SL.esc(r.satellite.id)},
+            acquired ${SL.evidence.day(r.satellite.date)}, ${SL.fmt(r.satellite.cloud_cover, 1)}% cloud cover
+            (context only; not used in scoring).</p>` : ""}
 
           <h2>Not assessed</h2>
           <p>${(r.missing_data || []).map(m => SL.esc(SL.cap(m))).join(", ") || "–"}</p>

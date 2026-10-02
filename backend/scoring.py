@@ -4,7 +4,9 @@ from criteria import (
     solar_footprint_size,
 )
 
-from use_cases import DATA_LAYERS, data_layer_available
+import data_registry
+
+import evidence
 
 
 # =============================================
@@ -78,16 +80,39 @@ def _missing_note(criterion):
     if criterion.evaluator is None:
         return criterion.missing_note or "Not measured yet."
 
-    layer = DATA_LAYERS.get(criterion.data_layer, {})
-
-    if not data_layer_available(criterion.data_layer):
+    if not data_registry.is_available(criterion.data_layer):
         return (
             criterion.missing_note
-            or f"No {layer.get('label', criterion.data_layer).lower()} "
+            or f"No {data_registry.layer_label(criterion.data_layer).lower()} "
                f"data connected."
         )
 
     return "Could not be measured for this candidate."
+
+
+def _missing_state(criterion, context):
+    """
+    Why a criterion has no evidence:
+
+        data_unavailable  no provider for its data layer
+        not_implemented   the data exists, but SkyLens has no
+                          evaluator for it yet
+        data_not_loaded   the layer has a provider but was not
+                          fetched for this analysis
+        not_measurable    the evaluator could not measure it for
+                          this candidate
+    """
+
+    if not data_registry.is_available(criterion.data_layer):
+        return "data_unavailable"
+
+    if criterion.evaluator is None:
+        return "not_implemented"
+
+    if not context.has_layer(criterion.data_layer):
+        return "data_not_loaded"
+
+    return "not_measurable"
 
 
 def score_weighted_criteria(candidate, spec, use_case, context):
@@ -128,12 +153,20 @@ def score_weighted_criteria(candidate, spec, use_case, context):
 
         if result is None:
 
+            note = _missing_note(criterion)
+
             results[criterion.id] = {
                 "label": criterion.label,
                 "weight": criterion.weight,
                 "available": False,
+                "state": _missing_state(criterion, context),
                 "score": None,
-                "note": _missing_note(criterion),
+                "note": note,
+                "evidence_items": evidence.dump([
+                    evidence.not_measured(
+                        criterion.label, criterion.data_layer, note
+                    )
+                ]),
             }
 
             missing.append(criterion.id)
@@ -146,8 +179,16 @@ def score_weighted_criteria(candidate, spec, use_case, context):
             "label": criterion.label,
             "weight": criterion.weight,
             "available": True,
+            "state": "measured",
             "score": round(score, 1),
             "evidence": result.get("evidence"),
+            "evidence_items": evidence.dump(
+                evidence.from_measurements(
+                    result.get("measurements"),
+                    criterion.data_layer,
+                    context.layer_provenance.get(criterion.data_layer),
+                )
+            ),
         }
 
         weighted_sum += criterion.weight * score

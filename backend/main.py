@@ -1125,9 +1125,25 @@ def analyze_stream(
 # Serve the frontend from the same origin (used on Render).
 # Mounted last so the API routes above take precedence.
 
+class FrontendFiles(StaticFiles):
+    """
+    Browsers must revalidate the frontend on every load (cheap: an
+    unchanged file is a 304). Otherwise, after a deploy, a cached old
+    script can run next to a new one and break the page.
+    """
+
+    async def get_response(self, path, scope):
+
+        response = await super().get_response(path, scope)
+
+        response.headers["Cache-Control"] = "no-cache"
+
+        return response
+
+
 app.mount(
     "/",
-    StaticFiles(
+    FrontendFiles(
         directory=os.path.join(BASE_DIR, "frontend"),
         html=True
     ),
