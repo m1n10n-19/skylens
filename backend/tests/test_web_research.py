@@ -10,6 +10,15 @@ import web_research
 from web_research import place_name, quotes_about, research, source_type
 
 
+@pytest.fixture(autouse=True)
+def fresh_cache(monkeypatch, tmp_path):
+    """
+    These tests count searches, so each gets an empty cache.
+    """
+
+    monkeypatch.setattr(web_research, "CACHE_DIR", str(tmp_path))
+
+
 # ============================================================
 # QUOTES AND SOURCES
 # ============================================================

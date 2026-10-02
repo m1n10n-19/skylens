@@ -270,6 +270,7 @@ EV_CHARGING = UseCase(
         "land_cover",
         "protected_areas",
         "land_in_use",
+        "infrastructure",
     ),
 
     criteria=(
@@ -367,6 +368,15 @@ EV_CHARGING = UseCase(
             data_layer="protected_areas",
             evaluator="protected_status",
         ),
+
+        Criterion(
+            id="infrastructure",
+            label="Infrastructure and projects nearby (OpenStreetMap)",
+            # Evidence only; a power line over the site warns.
+            weight=0.0,
+            data_layer="infrastructure",
+            evaluator="infrastructure_access",
+        ),
     ),
 
     discover_open_land=True,
@@ -455,6 +465,7 @@ COMMERCIAL_SITE_SELECTION = UseCase(
         "land_cover",
         "protected_areas",
         "land_in_use",
+        "infrastructure",
     ),
 
     criteria=(
@@ -555,6 +566,15 @@ COMMERCIAL_SITE_SELECTION = UseCase(
             data_layer="protected_areas",
             evaluator="protected_status",
         ),
+
+        Criterion(
+            id="infrastructure",
+            label="Infrastructure and projects nearby (OpenStreetMap)",
+            # Evidence only; a power line over the site warns.
+            weight=0.0,
+            data_layer="infrastructure",
+            evaluator="infrastructure_access",
+        ),
     ),
 
     discover_open_land=True,
@@ -634,6 +654,7 @@ LAND_ACQUISITION = UseCase(
         "land_cover",
         "protected_areas",
         "land_in_use",
+        "infrastructure",
     ),
 
     criteria=(
@@ -714,6 +735,15 @@ LAND_ACQUISITION = UseCase(
             weight=0.0,
             data_layer="protected_areas",
             evaluator="protected_status",
+        ),
+
+        Criterion(
+            id="infrastructure",
+            label="Infrastructure and projects nearby (OpenStreetMap)",
+            # Evidence only; a power line over the site warns.
+            weight=0.0,
+            data_layer="infrastructure",
+            evaluator="infrastructure_access",
         ),
     ),
 
@@ -854,6 +884,62 @@ CONSTRUCTION_PROGRESS = UseCase(
 )
 
 
+INFRASTRUCTURE_OUTLOOK = UseCase(
+
+    id="infrastructure_outlook",
+
+    title="Infrastructure outlook",
+
+    description=(
+        "Report what infrastructure exists and what is being built or "
+        "proposed near a place: metro and rail, roads, stations, power, "
+        "airports and large developments, with distances. No ranking."
+    ),
+
+    example_queries=(
+        "What major infrastructure is coming near Velachery?",
+        "Is there a metro or new road planned near OMR Thoraipakkam?",
+    ),
+
+    candidate_type="infrastructure",
+
+    candidate_noun="project",
+
+    candidate_source="infrastructure",
+
+    data_layers=(
+        "satellite_imagery",
+        "infrastructure",
+    ),
+
+    criteria=(),
+
+    output_format="infrastructure_report",
+
+    purpose="infrastructure near the place",
+
+    recommended_action=(
+        "Check the projects that matter to you with the implementing "
+        "agency (dates, alignment, land acquisition), and use 'Check the "
+        "web' for reported announcements."
+    ),
+
+    limitations=(
+        "Projects are only those tagged under construction or proposed on "
+        "OpenStreetMap; announced projects that are not mapped are missing.",
+
+        "Completion dates, funding and approvals are not known from the map.",
+    ),
+
+    aliases=(
+        "infrastructure",
+        "infrastructure_projects",
+        "planned_infrastructure",
+        "upcoming_infrastructure",
+    ),
+)
+
+
 USE_CASES = {
 
     use_case.id: use_case
@@ -864,6 +950,7 @@ USE_CASES = {
         COMMERCIAL_SITE_SELECTION,
         LAND_ACQUISITION,
         CONSTRUCTION_PROGRESS,
+        INFRASTRUCTURE_OUTLOOK,
     )
 }
 

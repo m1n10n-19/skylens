@@ -292,6 +292,31 @@ MEASUREMENTS = {
         "Share of the site inside mapped wetlands", "fraction", "measured", _OSM_PROTECTED,
     ),
 
+    # Infrastructure (OpenStreetMap)
+    "nearest_station_m": (
+        "Distance to the nearest mapped rail or metro station (within 3 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_bus_station_m": (
+        "Distance to the nearest mapped bus station (within 2 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_trunk_road_m": (
+        "Distance to the nearest mapped motorway or trunk road (within 2 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_substation_m": (
+        "Distance to the nearest mapped power substation (within 3 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_airport_m": (
+        "Distance to the nearest mapped airport (within 25 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_power_line_m": (
+        "Distance to the nearest mapped high-tension power line (within 500 m)", "m", "measured", _DISTANCE,
+    ),
+    "projects_within_5km": (
+        "Road, rail, power and development projects mapped as under construction or proposed within 5 km",
+        "count", "measured",
+        "Count of OpenStreetMap features tagged construction or proposed; dates and approvals unknown",
+    ),
+
     # Terrain (Copernicus DEM)
     "elevation_m": (
         "Surface elevation above sea level (median over the site)", "m", "measured", _DEM,

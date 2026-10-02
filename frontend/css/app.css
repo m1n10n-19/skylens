@@ -346,6 +346,11 @@ p { margin: 0 0 10px; }
 .basis-observed { color: var(--amber); }
 
 .web-card { margin-top: 12px; }
+.infra-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.infra-list li { overflow-wrap: anywhere; }
+.infra-list .muted { display: block; }
+.status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.infra-legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 4px 0; color: var(--muted); }
 .web-topic { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
 .web-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .web-list blockquote { margin: 0 0 4px; padding-left: 10px; border-left: 2px solid var(--line-2); font-size: 14px; overflow-wrap: anywhere; }

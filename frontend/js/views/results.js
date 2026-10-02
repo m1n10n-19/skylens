@@ -8,6 +8,7 @@
     commercial_site_selection: "commercial sites",
     land_acquisition: "land parcels",
     construction_progress: "changed areas",
+    infrastructure_outlook: "infrastructure projects",
   };
 
   // Queries that work today, offered when a question is not supported.
@@ -17,6 +18,7 @@
     commercial_site_selection: "Find 4800 sq ft sites around Adyar suitable for a food court",
     land_acquisition: "Find vacant land above 1 acre near OMR with good road access",
     construction_progress: "What has changed around Thoraipakkam in the last year?",
+    infrastructure_outlook: "What major infrastructure is coming near Velachery?",
   };
 
   function tooLarge(el, r) {
@@ -98,6 +100,44 @@
     }));
   }
 
+  // "What's reported about this area": section markup and button.
+  function webSection(r) {
+    return `
+          <section class="card web-card" id="web">
+            <div class="card-head"><span>What's reported about this area</span>
+              ${r.web_research ? "" : `<button class="btn-outline" id="web-run">${SL.icon("search", 16)} Check the web</button>`}</div>
+            <div id="web-body">${r.web_research ? SL.webFindingsHTML(r.web_research)
+              : `<p class="muted sm">Search news and government pages for infrastructure projects, flooding and
+                  land issues around ${SL.esc(SL.shortPlace(r.resolved_location && r.resolved_location.name))}.
+                  Results are quoted with their sources and are not verified. Uses one question.</p>`}</div>
+          </section>`;
+  }
+
+  function attachWeb(el, r, id) {
+    const webRun = SL.$("#web-run", el);
+    if (!webRun) return;
+    webRun.onclick = async () => {
+      webRun.disabled = true;
+      webRun.textContent = "Searching…";
+      try {
+        r.web_research = await SL.research(
+          (r.analysis_spec && r.analysis_spec.location) || (r.resolved_location && r.resolved_location.name),
+          (r.use_case || {}).id,
+        );
+        if (r.web_research.status === "success") SL.store.useQuestion();
+        SL.store.update(id, r);
+        SL.renderHeader();
+        SL.$("#web-body", el).innerHTML = SL.webFindingsHTML(r.web_research);
+        webRun.remove();
+      } catch (error) {
+        webRun.disabled = false;
+        webRun.textContent = "Check the web";
+        SL.$("#web-body", el).innerHTML = `<p class="notice">${SL.esc(error.text ||
+          (error.stage === "rate_limit" ? "You have used all your free questions." : "Web research failed. Try again."))}</p>`;
+      }
+    };
+  }
+
   function downloadJSON(result) {
     const blob = new Blob([JSON.stringify(result, null, 2)], {type: "application/json"});
     const a = document.createElement("a");
@@ -116,6 +156,8 @@
       if (!r) return SL.missingResult(el);
 
       if (r.status !== "success") return understood(el, r);
+
+      if ((r.use_case || {}).output_format === "infrastructure_report") return this.renderInfra(el, r, id);
 
       const top = r.top_prospects || [];
       const uc = r.use_case || {};
@@ -215,14 +257,13 @@
             <a class="btn-outline" href="#/next/${id}">What next? ${SL.icon("arrowRight", 16)}</a>
           </div>
 
-          <section class="card web-card" id="web">
-            <div class="card-head"><span>What's reported about this area</span>
-              ${r.web_research ? "" : `<button class="btn-outline" id="web-run">${SL.icon("search", 16)} Check the web</button>`}</div>
-            <div id="web-body">${r.web_research ? SL.webFindingsHTML(r.web_research)
-              : `<p class="muted sm">Search news and government pages for infrastructure projects, flooding and
-                  land issues around ${SL.esc(SL.shortPlace(r.resolved_location && r.resolved_location.name))}.
-                  Results are quoted with their sources and are not verified. Uses one question.</p>`}</div>
-          </section>
+          ${r.infrastructure ? `
+          <section class="card web-card">
+            <div class="card-head"><span>Infrastructure around the area</span></div>
+            ${SL.infraHTML(r.infrastructure, {compact: true})}
+          </section>` : ""}
+
+          ${webSection(r)}
 
           <details class="card limits">
             <summary>What this analysis does not tell you</summary>
@@ -251,29 +292,7 @@
       document.addEventListener("click", this.closeMenu);
       SL.$("#dl", el).onclick = () => downloadJSON(r);
 
-      const webRun = SL.$("#web-run", el);
-      if (webRun) {
-        webRun.onclick = async () => {
-          webRun.disabled = true;
-          webRun.textContent = "Searching…";
-          try {
-            r.web_research = await SL.research(
-              (r.analysis_spec && r.analysis_spec.location) || (r.resolved_location && r.resolved_location.name),
-              uc.id,
-            );
-            if (r.web_research.status === "success") SL.store.useQuestion();
-            SL.store.update(id, r);
-            SL.renderHeader();
-            SL.$("#web-body", el).innerHTML = SL.webFindingsHTML(r.web_research);
-            webRun.remove();
-          } catch (error) {
-            webRun.disabled = false;
-            webRun.textContent = "Check the web";
-            SL.$("#web-body", el).innerHTML = `<p class="notice">${SL.esc(error.text ||
-              (error.stage === "rate_limit" ? "You have used all your free questions." : "Web research failed. Try again."))}</p>`;
-          }
-        };
-      }
+      attachWeb(el, r, id);
 
       // ---- map: the searched area, then the ranked sites
       const map = this.map = SL.maps.create(SL.$("#res-map", el), {zoomControl: true});
@@ -301,6 +320,69 @@
         points.push([c.latitude, c.longitude]);
       });
       map.fitBounds(L.latLngBounds(points).extend(areaLayer.getBounds()), {padding: [30, 30]});
+    },
+
+    // "What infrastructure is coming near X?": an area report.
+    renderInfra(el, r, id) {
+
+      const report = r.infrastructure;
+      const loc = r.resolved_location;
+      const place = SL.shortPlace(loc.name);
+
+      el.innerHTML = `
+        <section class="page">
+          <a class="back" href="#/">${SL.icon("arrowLeft", 16)} Ask another question</a>
+          <h1>Infrastructure around ${SL.esc(place.split(",")[0])}</h1>
+          <p class="lead">${SL.esc(r.decision.summary)}</p>
+          ${r.search_area.description ? `<p class="searched">${SL.icon("pin", 14)} Searched ${SL.esc(r.search_area.description)}</p>` : ""}
+          <p class="q-echo">"${SL.esc(r.query)}"</p>
+
+          <div class="decision-grid">
+            <article class="card">${SL.infraHTML(report)}</article>
+            <div class="card map-card">
+              <div id="res-map"></div>
+              <div class="infra-legend sm">${Object.entries(SL.INFRA_COLORS).map(([status, color]) =>
+                `<span><i class="status-dot" style="background:${color}"></i>${SL.esc(SL.cap(status))}</span>`).join("")}</div>
+            </div>
+          </div>
+
+          <div class="decision-note card"><div>
+            <div class="muted sm">Recommended action</div>
+            <p>${SL.esc(r.decision.recommended_action)}</p>
+          </div></div>
+
+          ${webSection(r)}
+
+          <details class="card limits">
+            <summary>What this analysis does not tell you</summary>
+            <ul>${(r.limitations || []).map(l => `<li>${SL.esc(l)}</li>`).join("")}</ul>
+          </details>
+        </section>`;
+
+      attachWeb(el, r, id);
+
+      const map = this.map = SL.maps.create(SL.$("#res-map", el), {zoomControl: true});
+      map.zoomControl.setPosition("bottomright");
+      const areaLayer = SL.maps.searchLayer(r.search_area, loc.latitude, loc.longitude).addTo(map);
+      const group = L.featureGroup().addTo(map);
+      const draw = (item, color) => {
+        if (!item.geometry) return;
+        L.geoJSON(item.geometry, {
+          style: {color, weight: 4, opacity: 0.9, fillOpacity: 0.25},
+          pointToLayer: (f, latlng) => L.circleMarker(latlng, {radius: 7, color: "#0b100e", weight: 1, fillColor: color, fillOpacity: 1}),
+        }).bindTooltip(SL.esc(`${item.name || item.label} · ${item.label}`)).addTo(group);
+      };
+      report.existing.forEach(e => (e.nearest || [e]).forEach(n => draw(n, SL.INFRA_COLORS.existing)));
+      report.under_construction.forEach(p => draw(p, SL.INFRA_COLORS.under_construction));
+      report.proposed.forEach(p => draw(p, SL.INFRA_COLORS.proposed));
+      const bounds = areaLayer.getBounds();
+      const projects = report.under_construction.concat(report.proposed);
+      if (projects.length) {
+        const projectLayer = L.featureGroup();
+        projects.forEach(p => p.geometry && L.geoJSON(p.geometry).addTo(projectLayer));
+        bounds.extend(projectLayer.getBounds());
+      }
+      map.fitBounds(bounds, {padding: [30, 30]});
     },
 
     destroy() {

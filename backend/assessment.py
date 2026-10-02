@@ -91,6 +91,12 @@ VERIFY = {
         "records_check",
         "OpenStreetMap records only some protected areas and land uses; official records were not checked.",
     ),
+    "power_line": (
+        "Power line clearance",
+        "Does a power-line right-of-way or clearance zone restrict building on the site?",
+        "records_check",
+        "A mapped high-tension power line crosses or runs next to the site.",
+    ),
     "permits": (
         "Permits",
         "Is the change covered by building or land-use permits?",
@@ -225,8 +231,18 @@ def _water_recorded(scored):
 
 # Further verify items a measured criterion can raise:
 # criterion id -> [(verify id, condition)]; "why" is the evidence.
+def _power_line(scored):
+
+    from infrastructure import POWER_LINE_WARNING_M
+
+    distance = (scored.get("measurements") or {}).get("nearest_power_line_m")
+
+    return distance is not None and distance <= POWER_LINE_WARNING_M
+
+
 EXTRA = {
     "flood_risk": [("water_body", _water_recorded)],
+    "infrastructure": [("power_line", _power_line)],
 }
 
 

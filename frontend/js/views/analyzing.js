@@ -64,6 +64,9 @@
           : "Choosing the data to use";
       case "candidates": {
         const changes = (run.steps.intent || {}).use_case === "construction_progress";
+        if ((run.steps.intent || {}).use_case === "infrastructure_outlook") {
+          return done ? `${SL.fmt(d.count)} project${d.count === 1 ? "" : "s"} found` : "Reading mapped infrastructure";
+        }
         return done ? `${SL.fmt(d.count)} ${changes ? "changed area" : "candidate"}${d.count === 1 ? "" : "s"} found`
           : changes ? "Comparing satellite images from two dates" : "Scanning satellite imagery and map data";
       }

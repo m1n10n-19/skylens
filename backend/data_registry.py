@@ -576,6 +576,18 @@ _LAYERS = (
     ),
 
     DataLayer(
+        id="infrastructure",
+        label="Infrastructure and projects",
+        source="osm_overpass",
+        capabilities=("infrastructure_proximity", "planned_infrastructure", "power_lines"),
+        limitations=(
+            "Projects are only what is tagged under construction or proposed on OpenStreetMap; "
+            "completion dates, funding and approvals are unknown.",
+            "Power line positions on the map can be off by several metres.",
+        ),
+    ),
+
+    DataLayer(
         id="land_in_use",
         label="Land already in use (campuses, schools, parks...)",
         source="osm_overpass",

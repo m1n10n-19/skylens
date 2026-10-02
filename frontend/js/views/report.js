@@ -102,6 +102,10 @@
               <td>${ranks.map(n => "#" + n).join(", ")}</td></tr>`).join("")}</tbody>
           </table>` : ""}
 
+          ${r.infrastructure ? `
+          <h2>Infrastructure around the area</h2>
+          <div class="rp-web">${SL.infraHTML(r.infrastructure)}</div>` : ""}
+
           ${r.web_research && r.web_research.status === "success" ? `
           <h2>What's reported about this area (web)</h2>
           <div class="rp-web">${SL.webFindingsHTML(r.web_research)}</div>` : ""}

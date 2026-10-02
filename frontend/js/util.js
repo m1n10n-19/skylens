@@ -142,6 +142,8 @@ window.SL = window.SL || {};
     historical_imagery: ["Historical imagery", "satellite"],
     terrain: ["Terrain", "chart"],
     land_cover: ["Open land in imagery", "satellite"],
+    infrastructure: ["Infrastructure", "road"],
+    land_in_use: ["Land in use", "building"],
     protected_areas: ["Protected areas", "shield"],
     site_registry: ["Your sites", "folder"],
   };
@@ -157,6 +159,7 @@ window.SL = window.SL || {};
     commercial_site_selection: "Commercial site opportunity",
     land_acquisition: "Land opportunity",
     construction_progress: "Detected change",
+    infrastructure_outlook: "Infrastructure",
   };
 
   // What one ranked result is called: "Site #1" or "Change #1".

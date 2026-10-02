@@ -29,6 +29,8 @@ import landcover
 
 import ml_buildings
 
+import infrastructure
+
 # Candidates are not ranked when at least this much of them is inside
 # a protected area, inside land already in use, or (open land only)
 # covered by mapped buildings.
@@ -775,6 +777,133 @@ def _environment(use_case, context, candidates, emit):
     print("STEP 5b COMPLETE")
 
 
+def _area_metric(area, proj):
+
+    from shapely.geometry import shape as to_shape
+
+    return reproject(lambda x, y, z=None: proj.to_xy(x, y), to_shape(area.geometry))
+
+
+def _infrastructure(use_case, area, context, emit):
+    """
+    For use cases with an infrastructure criterion: read mapped
+    infrastructure and projects around the area (one Overpass request)
+    and keep the area summary for the report.
+    """
+
+    if not any(c.evaluator == "infrastructure_access" for c in use_case.criteria):
+        return
+
+    print("\nSTEP 5c: Reading infrastructure...")
+
+    try:
+        features = infrastructure.collect(area, context.proj)
+    except Exception as e:
+        print("INFRASTRUCTURE FAILED:", repr(e))
+        context.meta["infrastructure_problem"] = (
+            f"Infrastructure could not be read ({type(e).__name__}: {e})."
+        )
+        emit("layer", {"id": "infrastructure", "status": "failed"})
+        return
+
+    context.meta["infrastructure_features"] = features
+
+    context.meta["infrastructure"] = infrastructure.summary(features, _area_metric(area, context.proj), context.proj)
+
+    context.layer_status["infrastructure"] = "loaded"
+
+    emit("layer", {"id": "infrastructure", "status": "used"})
+
+
+def infrastructure_report(query, intent, spec, use_case, area, satellite, satellite_status, step, emit):
+    """
+    The "what infrastructure is coming near X?" answer: an area report,
+    no candidates and no scores.
+    """
+
+    from geodata import LocalProjection
+
+    step("candidates", "running")
+
+    proj = LocalProjection(area.latitude, area.longitude)
+
+    try:
+        features = infrastructure.collect(area, proj)
+    except Exception as e:
+        print("INFRASTRUCTURE FAILED:", repr(e))
+        raise HTTPException(status_code=502, detail={
+            "stage": "candidate_data", "error_type": type(e).__name__, "error": str(e),
+        })
+
+    report = infrastructure.summary(features, _area_metric(area, proj), proj)
+
+    emit("layer", {"id": "infrastructure", "status": "used"})
+
+    building = report["under_construction"]
+
+    proposed = report["proposed"]
+
+    step("candidates", "done", count=len(building) + len(proposed))
+
+    step("scoring", "done", ranked=0)
+
+    place = area.name
+
+    if building or proposed:
+        projects = sorted(building + proposed, key=lambda p: p["distance_m"])
+        # Name the nearest transport or utility project when there is one:
+        # it is what "what infrastructure is coming?" asks about.
+        works = [p for p in projects if p["kind"] != "development"]
+        nearest = (works or projects)[0]
+        summary = (
+            f"{len(building)} project(s) mapped as under construction and {len(proposed)} as "
+            f"proposed within 5 km of {place}. Nearest {'transport or utility project' if works else 'project'}: "
+            f"{nearest['name'] or nearest['label']} ({nearest['label'].lower()}, {nearest['distance_m']:,} m)."
+        )
+    else:
+        summary = f"No projects are mapped as under construction or proposed within 5 km of {place}."
+
+    step("decision", "done")
+
+    limitations = [f"Searched {area.description}."] + list(use_case.limitations)
+
+    completeness = {"status": "complete" if satellite_status == "loaded" else "partial",
+                    "reasons": [] if satellite_status == "loaded" else
+                    [f"Satellite imagery could not be retrieved ({satellite_status.removeprefix('failed: ')})."]}
+
+    return {
+        "status": "success",
+        "query": query,
+        "intent": intent,
+        "analysis_spec": spec.model_dump(),
+        "use_case": describe_use_case(use_case),
+        "resolved_location": {"name": area.address, "latitude": area.latitude, "longitude": area.longitude},
+        "search_area": area.public(),
+        "satellite": satellite,
+        "evidence": [
+            {"id": "infrastructure", "label": data_registry.layer_label("infrastructure"),
+             "source": data_registry.source_label("infrastructure"), "status": "used"},
+        ],
+        "analysis": {
+            "candidate_type": use_case.candidate_type,
+            "total_candidates": 0,
+            "shortlisted": 0,
+            "evidence_coverage": 1.0,
+        },
+        "infrastructure": report,
+        "top_prospects": [],
+        "decision": {
+            "summary": summary,
+            "recommended_action": use_case.recommended_action,
+            "confidence": "medium",
+        },
+        "confidence": "medium",
+        "missing_data": [],
+        "limitations": limitations,
+        "completeness": completeness,
+    }
+
+
 def _completeness(use_case, area, context, satellite_status):
     """
     Whether the analysis ran everything it planned with the providers
@@ -804,8 +933,8 @@ def _completeness(use_case, area, context, satellite_status):
             f"Not loaded for this analysis: {data_registry.layer_label(layer)}."
         )
 
-    for problem in ("ml_buildings_problem", "land_cover_problem", "recent_change_problem",
-                    "terrain_problem", "flood_problem"):
+    for problem in ("ml_buildings_problem", "land_cover_problem", "infrastructure_problem",
+                    "recent_change_problem", "terrain_problem", "flood_problem"):
         if context.meta.get(problem):
             reasons.append(context.meta[problem])
 
@@ -963,6 +1092,9 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         "status": "used" if satellite else "failed",
     })
 
+    if use_case.candidate_source == "infrastructure":
+        return infrastructure_report(query, intent, spec, use_case, area, satellite, satellite_status, step, emit)
+
     minimum, maximum = area_filter(spec, use_case)
 
     print("Minimum area:", minimum, "Maximum area:", maximum)
@@ -993,6 +1125,8 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
     candidates, dropped = _drop_unavailable(candidates, context)
 
     step("candidates", "done", count=len(candidates))
+
+    _infrastructure(use_case, area, context, emit)
 
     _environment(use_case, context, candidates, emit)
 
@@ -1216,4 +1350,8 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
         # Which imagery a change analysis compared; absent otherwise.
         **({"change_detection": change_meta} if change_meta else {}),
+
+        # Infrastructure around the area; absent when not measured.
+        **({"infrastructure": context.meta["infrastructure"]}
+           if context.meta.get("infrastructure") else {}),
     }

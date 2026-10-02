@@ -97,6 +97,8 @@ def test_every_evaluator_measurement_is_catalogued(land):
 
     context.meta["terrain"] = {"ring_m": 500}
 
+    context.meta["infrastructure_features"] = []
+
     candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900, "landcover": "grassland",
                        "discovered": {"land_cover_year": "2021", "note": "test"}})
 

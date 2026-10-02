@@ -424,8 +424,18 @@ def clear_year(cleared=False):
 # FIXTURES
 # ============================================================
 
+@pytest.fixture(scope="session")
+def web_cache_dir(tmp_path_factory):
+    """
+    One temporary web-search cache for the whole test session (a
+    folder per test is slow on Windows).
+    """
+
+    return str(tmp_path_factory.mktemp("web"))
+
+
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch, tmp_path):
+def isolated_env(monkeypatch, web_cache_dir):
     """
     No login, no question limit, fresh rate-limit counters, and no
     real network providers, whatever the local .env says.
@@ -438,7 +448,7 @@ def isolated_env(monkeypatch, tmp_path):
 
     # Never spend real web-search credits in tests.
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-    monkeypatch.setattr(web_research, "CACHE_DIR", str(tmp_path / "web"))
+    monkeypatch.setattr(web_research, "CACHE_DIR", web_cache_dir)
 
     ratelimit._by_ip.clear()
     ratelimit._total.clear()

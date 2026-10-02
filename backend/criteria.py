@@ -1059,6 +1059,72 @@ def protected_status(candidate, context, spec):
     }
 
 
+def _dist(metres):
+
+    return f"{metres / 1000:.1f} km" if metres >= 1000 else f"{round(metres)} m"
+
+
+def infrastructure_access(candidate, context, spec):
+    """
+    Distances to mapped infrastructure and nearby projects
+    (infrastructure.py). Evidence only (weight 0).
+    """
+
+    import infrastructure as infra
+
+    features = context.meta.get("infrastructure_features")
+
+    if features is None:
+        return None
+
+    shape = context.shape_of(candidate)
+
+    parts = []
+
+    measurements = {}
+
+    reasons = []
+
+    for kind, key in (("rail_station", "nearest_station_m"), ("bus_station", "nearest_bus_station_m"),
+                      ("major_road", "nearest_trunk_road_m"), ("substation", "nearest_substation_m"),
+                      ("airport", "nearest_airport_m")):
+
+        distance, feature = infra.nearest(features, shape, kind)
+
+        measurements[key] = round(distance) if distance is not None else None
+
+        if feature is not None:
+            name = f"{feature.name} " if feature.name else ""
+            kind_label = infra.KINDS[kind][0].lower()
+            parts.append(f"{kind_label} {name}{_dist(distance)}".replace("  ", " "))
+
+    line_distance, line = infra.nearest(features, shape, "power_line")
+
+    measurements["nearest_power_line_m"] = round(line_distance) if line_distance is not None else None
+
+    if line_distance is not None and line_distance <= infra.POWER_LINE_WARNING_M:
+        where = "crosses the site" if line_distance == 0 else f"runs {round(line_distance)} m from the site"
+        reasons.append(f"Warning: a mapped high-tension power line {where}")
+        parts.append(f"power line {where}")
+
+    projects = infra.projects_near(features, shape)
+
+    measurements["projects_within_5km"] = len(projects)
+
+    if projects:
+        # Transport and utility projects are named before developments.
+        ordered = sorted(projects, key=lambda df: df[1].kind == "development")
+        named = [f"{f.name or f.label.lower()} ({f.status.replace('_', ' ')}, {_dist(d)})" for d, f in ordered[:3]]
+        parts.append(f"{len(projects)} project(s) under construction or proposed within 5 km: " + "; ".join(named))
+
+    return {
+        "score": 100,
+        "evidence": ("Nearest " + "; ".join(parts)) if parts else "No mapped infrastructure within the search distances",
+        "reasons": reasons,
+        "measurements": measurements,
+    }
+
+
 def flood_exposure(candidate, context, spec):
     """
     Observed flood exposure from radar flood observations, the JRC
@@ -1181,4 +1247,5 @@ EVALUATORS = {
     "terrain": terrain,
     "flood_exposure": flood_exposure,
     "protected_status": protected_status,
+    "infrastructure_access": infrastructure_access,
 }

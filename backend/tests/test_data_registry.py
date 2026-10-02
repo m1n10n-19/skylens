@@ -83,6 +83,11 @@ NEW_LAYERS = {
         "source": "OpenStreetMap (Overpass)",
         "available": True,
     },
+    "infrastructure": {
+        "label": "Infrastructure and projects",
+        "source": "OpenStreetMap (Overpass)",
+        "available": True,
+    },
 }
 
 

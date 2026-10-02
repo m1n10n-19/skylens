@@ -43,6 +43,7 @@ def test_use_cases_lists_registry(client):
         "commercial_site_selection",
         "land_acquisition",
         "construction_progress",
+        "infrastructure_outlook",
     ]
 
 
@@ -171,7 +172,7 @@ def test_analyze_unsupported_use_case(client, deepseek):
 
     assert body["status"] == "unsupported_use_case"
     assert body["detected_requirements"]["intent_type"] == "railway_inspection"
-    assert len(body["supported_use_cases"]) == 5
+    assert len(body["supported_use_cases"]) == 6
 
 
 def test_analyze_not_yet_implemented_produces_no_result(client, deepseek, monkeypatch):
