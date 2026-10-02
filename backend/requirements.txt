@@ -10,3 +10,5 @@ pystac-client
 planetary-computer
 numpy
 rasterio
+pyarrow
+adlfs

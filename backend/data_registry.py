@@ -325,6 +325,35 @@ ESA_WORLDCOVER_PC = DataSource(
 )
 
 
+MS_BUILDINGS_PC = DataSource(
+
+    id="ms_buildings_planetary_computer",
+
+    name="Microsoft building footprints (Microsoft Planetary Computer)",
+
+    provider="Microsoft Global ML Building Footprints (from Bing Maps imagery), via Microsoft Planetary Computer",
+
+    spatial_resolution="Individual building outlines",
+
+    temporal_resolution="Releases from imagery 2014-2023",
+
+    coverage="Global, including India",
+
+    freshness="Buildings visible in imagery up to 2023",
+
+    cost="free",
+
+    latency="About 30 s for the first question in a region, then about 1 s (local cache)",
+
+    license="ODbL",
+
+    limitations=(
+        "Detected by machine learning: some buildings are missed or misshapen.",
+        "Buildings built after the imagery (2014-2023) are not included.",
+    ),
+)
+
+
 SOURCES = {
 
     source.id: source
@@ -338,6 +367,7 @@ SOURCES = {
         JRC_GSW_PC,
         NASA_POWER,
         ESA_WORLDCOVER_PC,
+        MS_BUILDINGS_PC,
     )
 }
 
@@ -362,6 +392,8 @@ _LAYERS = (
         id="building_footprints",
         label="Building footprints",
         source="osm_overpass",
+        # Machine-learning footprints fill gaps in OSM for land analyses.
+        other_sources=("ms_buildings_planetary_computer",),
         capabilities=("building_detection", "land_area"),
         limitations=(
             "Footprint area is not usable roof area.",

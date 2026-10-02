@@ -282,8 +282,8 @@ MEASUREMENTS = {
     ),
     "building_cover_share": (
         "Share of the site covered by mapped building footprints", "fraction", "measured",
-        "Overlap of the site with OpenStreetMap building footprints; buildings missing "
-        "from the map are not counted",
+        "Overlap of the site with OpenStreetMap building footprints and Microsoft "
+        "machine-learning footprints (imagery 2014-2023); newer buildings are not counted",
     ),
     "wetland_overlap_share": (
         "Share of the site inside mapped wetlands", "fraction", "measured", _OSM_PROTECTED,

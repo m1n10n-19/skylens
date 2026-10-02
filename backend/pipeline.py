@@ -27,6 +27,8 @@ import flood
 
 import landcover
 
+import ml_buildings
+
 # Candidates are not ranked when at least this much of them is inside
 # a protected area, inside land already in use, or (open land only)
 # covered by mapped buildings.
@@ -273,6 +275,59 @@ def _satellite(latitude, longitude, radius_km):
     return satellite, "loaded"
 
 
+def _add_ml_buildings(area, context):
+    """
+    Add machine-learning building footprints (ml_buildings.py) to the
+    mapped buildings, for buildings OpenStreetMap does not have.
+    Problems never stop the analysis; they are reported.
+    """
+
+    from shapely.geometry import shape as to_shape
+
+    print("\nSTEP 5a: Reading machine-learning building footprints...")
+
+    try:
+
+        west, south, east, north = to_shape(area.geometry).bounds
+
+        m = 0.001
+
+        found, info = ml_buildings.buildings_in((west - m, south - m, east + m, north + m))
+
+    except Exception as e:
+
+        print("ML BUILDINGS FAILED:", repr(e))
+
+        context.meta["ml_buildings_problem"] = (
+            "Machine-learning building footprints could not be read "
+            f"({type(e).__name__}: {e}); only buildings mapped on OpenStreetMap were used."
+        )
+
+        return
+
+    proj = context.proj
+
+    if found:
+
+        import numpy as np
+        import shapely
+
+        # Tens of thousands of outlines: convert all coordinates at once.
+        shapes = np.array(found, dtype=object)
+
+        lonlat = shapely.get_coordinates(shapes)
+
+        x, y = proj.to_xy(lonlat[:, 0], lonlat[:, 1])
+
+        context.buildings += list(shapely.set_coordinates(shapes.copy(), np.column_stack([x, y])))
+
+    context.meta.pop("_building_index", None)
+
+    context.meta["ml_buildings"] = {**info, "count": len(found)}
+
+    print("STEP 5a: added", len(found), "footprints")
+
+
 def _discover_open_land(area, context, osm_candidates, minimum, maximum):
     """
     Open land found in imagery (landcover.discover), added to the OSM
@@ -456,6 +511,7 @@ def _candidates(use_case, spec, area, minimum, maximum, place):
             context.meta["land_only"] = land_only
 
             if use_case.discover_open_land:
+                _add_ml_buildings(area, context)
                 candidates += _discover_open_land(area, context, candidates, minimum, maximum)
 
     except change_detection.ChangeDataUnavailable:
@@ -748,7 +804,8 @@ def _completeness(use_case, area, context, satellite_status):
             f"Not loaded for this analysis: {data_registry.layer_label(layer)}."
         )
 
-    for problem in ("land_cover_problem", "recent_change_problem", "terrain_problem", "flood_problem"):
+    for problem in ("ml_buildings_problem", "land_cover_problem", "recent_change_problem",
+                    "terrain_problem", "flood_problem"):
         if context.meta.get(problem):
             reasons.append(context.meta[problem])
 

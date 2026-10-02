@@ -24,6 +24,7 @@ import change_detection
 import flood
 import geodata
 import landcover
+import ml_buildings
 import terrain
 import main
 import pipeline
@@ -456,6 +457,8 @@ def isolated_env(monkeypatch):
     monkeypatch.setattr(flood, "climatology", no_network)
     monkeypatch.setattr(landcover, "search_tiles", no_network)
     monkeypatch.setattr(landcover, "read_classes", no_network)
+    monkeypatch.setattr(ml_buildings, "search_tiles", no_network)
+    monkeypatch.setattr(ml_buildings, "download", no_network)
 
     yield
 
@@ -625,9 +628,20 @@ def open_land(monkeypatch):
     """
     open_land(found=[...], problems=[...]) fakes landcover.discover:
     found is a list of (dx_m, dy_m, side_m, land cover) squares.
+    Machine-learning building footprints are faked too: `footprints`
+    is a list of (dx_m, dy_m, side_m) squares.
     """
 
-    def install(found=(), problems=()):
+    def install(found=(), problems=(), footprints=()):
+
+        from shapely.geometry import Polygon
+
+        def fake_buildings(bbox, **kwargs):
+            shapes = [Polygon([(p["lon"], p["lat"]) for p in square(dx, dy, side)])
+                      for dx, dy, side in footprints]
+            return shapes, {"source": ml_buildings.SOURCE_ID, "tiles": ["test"]}
+
+        monkeypatch.setattr(ml_buildings, "buildings_in", fake_buildings)
 
         def fake(area_geometry, context, existing, min_area_m2=0, max_area_m2=None, **kwargs):
             candidates = []

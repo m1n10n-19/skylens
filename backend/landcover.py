@@ -218,12 +218,31 @@ def discover(area_geometry, context, existing, min_area_m2=0, max_area_m2=None,
 
     proj = context.proj
 
-    def to_grid(metric_shape):
-        lonlat = reproject(lambda x, y, z=None: proj.to_lonlat(x, y), metric_shape)
-        return transform_geom("EPSG:4326", grid.crs, mapping(lonlat))
+    def to_grid(metric_shapes):
+        """
+        Metric shapes in the grid's CRS, converted all at once (there
+        can be tens of thousands of building outlines).
+        """
+
+        import shapely
+
+        from rasterio.warp import transform as warp
+
+        shapes = np.array([s for s in metric_shapes if not s.is_empty], dtype=object)
+
+        if not len(shapes):
+            return []
+
+        xy = shapely.get_coordinates(shapes)
+
+        lon, lat = proj.to_lonlat(xy[:, 0], xy[:, 1])
+
+        gx, gy = warp("EPSG:4326", grid.crs, lon, lat)
+
+        return list(shapely.set_coordinates(shapes.copy(), np.column_stack([gx, gy])))
 
     def burn(metric_shapes):
-        shapes = [to_grid(s) for s in metric_shapes if not s.is_empty]
+        shapes = to_grid(metric_shapes)
         if not shapes:
             return np.zeros((grid.height, grid.width), dtype=bool)
         return rasterize(shapes, out_shape=(grid.height, grid.width),
