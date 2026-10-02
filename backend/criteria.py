@@ -22,6 +22,9 @@ Signature: evaluator(candidate, context, spec) -> dict | None
 
 import math
 
+from change_detection import LABELS as CHANGE_LABELS
+from change_detection import PARCEL_ALERT_SHARE
+
 from geodata import (
     CHARGER_RADIUS_M,
     MAJOR_ROAD_RADIUS_M,
@@ -791,6 +794,64 @@ def imagery_quality(candidate, context, spec):
     }
 
 
+# Changes on a site that may mean it is no longer what the map says.
+ALERT_CHANGES = ("built_or_bare_increase", "vegetation_loss", "water_gain")
+
+
+def recent_change(candidate, context, spec):
+    """
+    Share of the site that changed between two Sentinel-2 images
+    (change_detection.measure_parcels, run for the shortlist only).
+    Evidence only: the use cases give it weight 0.
+    """
+
+    measured = candidate.get("recent_change")
+
+    if measured is None:
+        return None
+
+    if not measured["measurable"]:
+        return {"not_measured": measured["reason"]}
+
+    scenes = context.meta["recent_change"]
+
+    before = _day(scenes["before"]["date"])
+
+    after = _day(scenes["after"]["date"])
+
+    shares = measured["shares"]
+
+    parts = [
+        f"{CHANGE_LABELS[t].lower()} on {round(share * 100)}%"
+        for t, share in sorted(shares.items(), key=lambda kv: -kv[1])
+        if share >= 0.05
+    ]
+
+    evidence = (
+        f"{'; '.join(parts).capitalize()} of the site" if parts
+        else "No change detected on the site"
+    ) + f", {before} to {after}"
+
+    reasons = [
+        f"Warning: {CHANGE_LABELS[t].lower()} on {round(shares[t] * 100)}% of the site "
+        f"between {before} and {after}"
+        for t in ALERT_CHANGES
+        if shares[t] >= PARCEL_ALERT_SHARE
+    ]
+
+    return {
+        "score": 100 * (1 - measured["changed_share"]),
+        "evidence": evidence,
+        "reasons": reasons,
+        "measurements": {
+            "changed_share": measured["changed_share"],
+            **{f"{t}_share": shares[t] for t in shares},
+            "before_scene_date": scenes["before"]["date"],
+            "after_scene_date": scenes["after"]["date"],
+        },
+    }
+
+
 # ============================================================
 # REGISTRY
 # ============================================================
@@ -812,4 +873,5 @@ EVALUATORS = {
     "change_magnitude": change_magnitude,
     "changed_area": changed_area,
     "imagery_quality": imagery_quality,
+    "recent_change": recent_change,
 }

@@ -90,6 +90,14 @@ VERIFY = {
         "Grid capacity is not assessed by SkyLens.",
     ),
 
+    # Only listed when the site changed (see CONDITIONAL).
+    "recent_change": (
+        "Recent change on site",
+        "What is on the site now: new construction, clearing or water?",
+        "field_visit",
+        "Recent satellite imagery shows change on the site.",
+    ),
+
     # Imagery
     "cause_of_change": (
         "Cause of the change",
@@ -158,6 +166,23 @@ VERIFY = {
 }
 
 
+def _site_changed(scored):
+
+    from criteria import ALERT_CHANGES
+    from change_detection import PARCEL_ALERT_SHARE
+
+    m = scored.get("measurements") or {}
+
+    return any((m.get(f"{t}_share") or 0) >= PARCEL_ALERT_SHARE for t in ALERT_CHANGES)
+
+
+# Verify items listed only when their condition holds for the site;
+# "why" is then the criterion's evidence summary.
+CONDITIONAL = {
+    "recent_change": _site_changed,
+}
+
+
 # Evidence statuses from strongest to weakest. A known criterion's
 # basis is the weakest status among its evidence items that carry a
 # unit (distances, areas, counts); descriptive tags such as a road's
@@ -223,9 +248,14 @@ def assess(scored, use_case):
                 "reason": entry["note"],
             })
 
-        if criterion_id in VERIFY:
+        condition = CONDITIONAL.get(criterion_id)
+
+        if criterion_id in VERIFY and (condition is None or (measured and condition(scored))):
 
             label, question, method_type, why = VERIFY[criterion_id]
+
+            if condition is not None:
+                why = entry.get("evidence")
 
             verify.append({
                 "id": criterion_id,

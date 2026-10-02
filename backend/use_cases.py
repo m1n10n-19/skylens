@@ -262,6 +262,7 @@ EV_CHARGING = UseCase(
         "points_of_interest",
         "ev_chargers",
         "flood_risk",
+        "historical_imagery",
     ),
 
     criteria=(
@@ -328,6 +329,16 @@ EV_CHARGING = UseCase(
             weight=0.15,
             data_layer="flood_risk",
             missing_note="No flood-risk data connected.",
+        ),
+
+        Criterion(
+            id="recent_change",
+            label="Recent change on site (Sentinel-2)",
+            # Evidence only: change is reported, not scored, because
+            # its meaning is ambiguous (clearing may mean "ready to build").
+            weight=0.0,
+            data_layer="historical_imagery",
+            evaluator="recent_change",
         ),
     ),
 
@@ -410,6 +421,7 @@ COMMERCIAL_SITE_SELECTION = UseCase(
         "points_of_interest",
         "parking",
         "population",
+        "historical_imagery",
     ),
 
     criteria=(
@@ -468,6 +480,16 @@ COMMERCIAL_SITE_SELECTION = UseCase(
             weight=0.15,
             data_layer="population",
             missing_note="No population or footfall data connected.",
+        ),
+
+        Criterion(
+            id="recent_change",
+            label="Recent change on site (Sentinel-2)",
+            # Evidence only: change is reported, not scored, because
+            # its meaning is ambiguous (clearing may mean "ready to build").
+            weight=0.0,
+            data_layer="historical_imagery",
+            evaluator="recent_change",
         ),
     ),
 
@@ -541,6 +563,7 @@ LAND_ACQUISITION = UseCase(
         "zoning",
         "flood_risk",
         "ownership",
+        "historical_imagery",
     ),
 
     criteria=(
@@ -591,6 +614,16 @@ LAND_ACQUISITION = UseCase(
             weight=0.15,
             data_layer="flood_risk",
             missing_note="No flood-risk data connected.",
+        ),
+
+        Criterion(
+            id="recent_change",
+            label="Recent change on site (Sentinel-2)",
+            # Evidence only: change is reported, not scored, because
+            # its meaning is ambiguous (clearing may mean "ready to build").
+            weight=0.0,
+            data_layer="historical_imagery",
+            evaluator="recent_change",
         ),
     ),
 

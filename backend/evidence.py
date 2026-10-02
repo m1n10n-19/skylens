@@ -97,6 +97,11 @@ _INDEX = (
 
 _SCENE = "From the Sentinel-2 scene metadata"
 
+_SHARE = (
+    "Share of the site's cloud-free 10 m pixels whose spectral change "
+    "between the two Sentinel-2 images passed the thresholds"
+)
+
 _CLOUD = "Pixels classed as clear ground in the scene classification layer"
 
 _ABSENT = (
@@ -203,6 +208,26 @@ MEASUREMENTS = {
     "clear_fraction_after": (
         "Share of the searched area clear of cloud in the later scene", "fraction",
         "measured", _CLOUD,
+    ),
+    # Recent change on a site (shares of its clear pixels)
+    "changed_share": (
+        "Share of the site that changed", "fraction", "measured", _SHARE,
+    ),
+    "built_or_bare_increase_share": (
+        "Share of the site where built-up or bare surface increased", "fraction",
+        "measured", _SHARE,
+    ),
+    "vegetation_loss_share": (
+        "Share of the site that lost vegetation", "fraction", "measured", _SHARE,
+    ),
+    "vegetation_gain_share": (
+        "Share of the site that gained vegetation", "fraction", "measured", _SHARE,
+    ),
+    "water_gain_share": (
+        "Share of the site where water appeared", "fraction", "measured", _SHARE,
+    ),
+    "water_loss_share": (
+        "Share of the site where water receded", "fraction", "measured", _SHARE,
     ),
     "season_gap_days": (
         "Difference in time of year between the two scenes", "days", "measured",

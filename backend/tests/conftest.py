@@ -8,10 +8,13 @@ Planetary Computer are replaced with fakes that return fixed data.
 import math
 import os
 
+from datetime import date, datetime, timedelta, timezone
+
 # main.py refuses to import without a key; set a dummy one first.
 # load_dotenv() does not override variables that are already set.
 os.environ.setdefault("DEEPSEEK_API_KEY", "test-key")
 
+import numpy as np
 import pytest
 
 from fastapi.testclient import TestClient
@@ -289,6 +292,74 @@ def planner_reply(intent_type, location="Adyar, Chennai", **extra):
 
 
 # ============================================================
+# FAKE SENTINEL-2 IMAGERY
+# ============================================================
+
+class FakeAsset:
+
+    def __init__(self, href):
+        self.href = href
+
+
+class FakeItem:
+
+    def __init__(self, scene_id, day, cloud=5.0, baseline="05.11"):
+        self.id = scene_id
+        self.datetime = datetime(day.year, day.month, day.day, 5, tzinfo=timezone.utc)
+        self.properties = {"eo:cloud_cover": cloud, "s2:processing_baseline": baseline}
+        self.assets = {b: FakeAsset(f"{scene_id}/{b}") for b in ("B03", "B04", "B08", "B11", "SCL")}
+
+
+class FakeImagery:
+    """
+    search(bbox, start, end) and reader(href, grid) over scenes defined
+    as {scene_id: {"day": date, "cloudy": bool, "cleared": bool | "all"}}.
+    "cleared" scenes have bare ground in the north-west quarter of the
+    grid ("all": the whole grid) where the others have dense vegetation.
+    """
+
+    def __init__(self, scenes):
+        self.scenes = scenes
+        self.reads = []
+        self.searches = []
+
+    def search(self, bbox, start, end):
+        self.searches.append((start, end))
+        return [FakeItem(sid, s["day"]) for sid, s in self.scenes.items() if start <= s["day"] <= end]
+
+    def reader(self, href, grid):
+        scene_id, band = href.split("/")
+        self.reads.append(href)
+        scene = self.scenes[scene_id]
+        h, w = grid.height, grid.width
+        if band == "SCL":
+            return np.full((h, w), 9 if scene["cloudy"] else 4, dtype="uint8")
+        # DN with the 1000 offset (baseline 05.11): dense vegetation.
+        value = {"B03": 1500, "B04": 1400, "B08": 5000, "B11": 2500}[band]
+        out = np.full((h, w), value, dtype="uint16")
+        if scene.get("cleared"):
+            bare = {"B03": 2200, "B04": 2600, "B08": 3000, "B11": 4200}[band]
+            if scene["cleared"] == "all":
+                out[:, :] = bare
+            else:
+                out[: h // 2, : w // 2] = bare
+        return out
+
+
+def clear_year(cleared=False):
+    """
+    Two clear scenes a year apart; the later one cleared if asked.
+    """
+
+    today = date.today()
+
+    return {
+        "before": {"day": today - timedelta(days=370), "cloudy": False},
+        "after": {"day": today - timedelta(days=5), "cloudy": False, "cleared": cleared},
+    }
+
+
+# ============================================================
 # FIXTURES
 # ============================================================
 
@@ -368,6 +439,21 @@ def geocoder(monkeypatch):
     def install(raw=None):
         fake = FakeGeolocator(raw)
         monkeypatch.setattr(main, "geolocator", fake)
+        return fake
+
+    return install
+
+
+@pytest.fixture
+def imagery(monkeypatch):
+    """
+    imagery(scenes) installs fake Sentinel-2 search and band reading.
+    """
+
+    def install(scenes):
+        fake = FakeImagery(scenes)
+        monkeypatch.setattr(change_detection, "search_scenes", fake.search)
+        monkeypatch.setattr(change_detection, "read_band", fake.reader)
         return fake
 
     return install

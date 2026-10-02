@@ -151,15 +151,22 @@ def score_weighted_criteria(candidate, spec, use_case, context):
                 candidate, context, spec
             )
 
+        # An evaluator can say why it could not measure this candidate.
+        reason = None
+
+        if result is not None and "not_measured" in result:
+            reason = result["not_measured"]
+            result = None
+
         if result is None:
 
-            note = _missing_note(criterion)
+            note = reason or _missing_note(criterion)
 
             results[criterion.id] = {
                 "label": criterion.label,
                 "weight": criterion.weight,
                 "available": False,
-                "state": _missing_state(criterion, context),
+                "state": "not_measurable" if reason else _missing_state(criterion, context),
                 "score": None,
                 "note": note,
                 "evidence_items": evidence.dump([

@@ -17,7 +17,7 @@ import change_detection as cd
 from analysis_spec import parse_time_range
 from shapely.geometry import box
 
-from tests.conftest import LAT, LON, planner_reply
+from tests.conftest import LAT, LON, FakeImagery, planner_reply
 
 
 # ============================================================
@@ -158,54 +158,6 @@ def test_season_gap(a, b, gap):
 # SYNTHETIC SCENES
 # ============================================================
 
-class FakeAsset:
-
-    def __init__(self, href):
-        self.href = href
-
-
-class FakeItem:
-
-    def __init__(self, scene_id, day, cloud=5.0, baseline="05.11"):
-        self.id = scene_id
-        self.datetime = datetime(day.year, day.month, day.day, 5, tzinfo=timezone.utc)
-        self.properties = {"eo:cloud_cover": cloud, "s2:processing_baseline": baseline}
-        self.assets = {b: FakeAsset(f"{scene_id}/{b}") for b in ("B03", "B04", "B08", "B11", "SCL")}
-
-
-class FakeImagery:
-    """
-    search(bbox, start, end) and reader(href, grid) over scenes defined
-    as {scene_id: {"day": date, "cloudy": bool, "cleared": bool}}.
-    "cleared" scenes have bare ground in the north-west quarter where
-    the others have dense vegetation.
-    """
-
-    def __init__(self, scenes):
-        self.scenes = scenes
-        self.reads = []
-        self.searches = []
-
-    def search(self, bbox, start, end):
-        self.searches.append((start, end))
-        return [FakeItem(sid, s["day"]) for sid, s in self.scenes.items() if start <= s["day"] <= end]
-
-    def reader(self, href, grid):
-        scene_id, band = href.split("/")
-        self.reads.append(href)
-        scene = self.scenes[scene_id]
-        h, w = grid.height, grid.width
-        if band == "SCL":
-            return np.full((h, w), 9 if scene["cloudy"] else 4, dtype="uint8")
-        # DN with the 1000 offset (baseline 05.11): dense vegetation.
-        value = {"B03": 1500, "B04": 1400, "B08": 5000, "B11": 2500}[band]
-        out = np.full((h, w), value, dtype="uint16")
-        if scene.get("cleared"):
-            bare = {"B03": 2200, "B04": 2600, "B08": 3000, "B11": 4200}[band]
-            out[: h // 2, : w // 2] = bare
-        return out
-
-
 AREA = box(LON - 0.004, LAT - 0.004, LON + 0.004, LAT + 0.004)
 
 TODAY = date(2026, 10, 2)
@@ -315,18 +267,6 @@ def test_time_range_parsing(raw, start, end):
 # ============================================================
 # END TO END
 # ============================================================
-
-@pytest.fixture
-def imagery(monkeypatch):
-
-    def install(scenes):
-        fake = FakeImagery(scenes)
-        monkeypatch.setattr(cd, "search_scenes", fake.search)
-        monkeypatch.setattr(cd, "read_band", fake.reader)
-        return fake
-
-    return install
-
 
 def test_analyze_change_end_to_end(client, deepseek, imagery):
 

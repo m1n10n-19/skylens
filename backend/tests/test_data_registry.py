@@ -68,12 +68,22 @@ def test_describe_use_case_keeps_every_old_field():
 
         for key, value in old.items():
 
-            if key != "data_layers":
+            if key not in ("data_layers", "criteria"):
                 assert new[key] == value, (use_case.id, key)
 
-        for old_layer, new_layer in zip(old["data_layers"], new["data_layers"], strict=True):
-            for key, value in old_layer.items():
-                assert new_layer[key] == value, (use_case.id, old_layer["id"], key)
+        # Layers and criteria may only be appended (Phase 2 added the
+        # evidence-only recent_change criterion and historical imagery).
+        for list_key in ("data_layers", "criteria"):
+
+            assert len(new[list_key]) >= len(old[list_key])
+
+            for old_item, new_item in zip(old[list_key], new[list_key]):
+                for key, value in old_item.items():
+                    assert new_item[key] == value, (use_case.id, list_key, old_item["id"], key)
+
+            for added in new[list_key][len(old[list_key]):]:
+                if list_key == "criteria":
+                    assert added["weight"] == 0, (use_case.id, added["id"])
 
 
 def test_data_layer_available_matches_registry():

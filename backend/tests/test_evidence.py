@@ -81,6 +81,14 @@ def test_every_evaluator_measurement_is_catalogued(land):
         }},
     ]
 
+    candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900, "recent_change": {
+        "measurable": True, "pixels": 9, "clear_pixels": 9, "changed_share": 0.4,
+        "shares": {"water_gain": 0.0, "water_loss": 0.0, "built_or_bare_increase": 0.3,
+                   "vegetation_loss": 0.1, "vegetation_gain": 0.0},
+    }})
+
+    context.meta["recent_change"] = {"before": scene, "after": scene}
+
     seen = set()
 
     for name, evaluator in EVALUATORS.items():

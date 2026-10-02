@@ -84,8 +84,17 @@ MAX_SCENES_CHECKED = 6
 # mostly noise at 10 m.
 MIN_PATCH_PIXELS = 5
 
-# Largest grid read (6 x 6 km).
+# Largest grid read for an area (6 x 6 km), and for the bounding box
+# of a shortlist of parcels, which can be spread along a road.
 MAX_GRID_PIXELS = 600 * 600
+
+MAX_PARCEL_GRID_PIXELS = 1000 * 1000
+
+# Parcels with fewer pixels than this are too small to measure.
+MIN_PARCEL_PIXELS = 3
+
+# A change covering at least this share of a parcel is flagged.
+PARCEL_ALERT_SHARE = 0.2
 
 TIME_BUDGET_SECONDS = 75
 
@@ -349,7 +358,7 @@ class Grid:
     bbox_lonlat: tuple
 
 
-def make_grid(geometry_lonlat):
+def make_grid(geometry_lonlat, max_pixels=MAX_GRID_PIXELS):
     """
     A 10 m UTM grid covering the area, and the mask of pixels inside it.
     """
@@ -379,7 +388,7 @@ def make_grid(geometry_lonlat):
 
     height = int((maxy - miny) / PIXEL_M)
 
-    if width * height > MAX_GRID_PIXELS:
+    if width * height > max_pixels:
         raise ValueError(f"Area too large for change detection ({width} x {height} pixels)")
 
     transform = from_origin(minx, maxy, PIXEL_M, PIXEL_M)
@@ -569,11 +578,27 @@ def _to_lonlat(geometry, crs):
     return transform_geom(crs, "EPSG:4326", geometry, precision=6)
 
 
-def detect_changes(geometry, before_date=None, after_date=None,
-                   change_types=CHANGE_TYPES, today=None,
-                   search=None, reader=None):
+@dataclass
+class Comparison:
+
+    before: Scene
+
+    after: Scene
+
+    before_idx: dict
+
+    after_idx: dict
+
+    # Pixels clear in both scenes and inside the grid's area.
+    valid: object
+
+    labels: object
+
+
+def compare(grid, before_date=None, after_date=None, change_types=CHANGE_TYPES,
+            today=None, search=None, reader=None):
     """
-    ChangeResult for a shapely lon/lat geometry.
+    Choose the two scenes for the grid and classify every pixel.
 
     after_date: latest date for the later scene (default today); the
     most recent clear scene in the AFTER_LOOKBACK_DAYS before it is used.
@@ -593,8 +618,6 @@ def detect_changes(geometry, before_date=None, after_date=None,
     today = today or date.today()
 
     after_date = min(after_date or today, today)
-
-    grid = make_grid(geometry)
 
     # Later scene: most recent clear one.
     after_items = search(grid.bbox_lonlat, after_date - timedelta(days=AFTER_LOOKBACK_DAYS), after_date)
@@ -647,9 +670,25 @@ def detect_changes(geometry, before_date=None, after_date=None,
 
     valid = before.clear & after.clear
 
-    labels = classify(before_idx, after_idx, valid, change_types)
+    return Comparison(
+        before, after, before_idx, after_idx, valid,
+        classify(before_idx, after_idx, valid, change_types),
+    )
 
-    found = patches(labels, grid.transform, before_idx, after_idx)
+
+def detect_changes(geometry, before_date=None, after_date=None,
+                   change_types=CHANGE_TYPES, today=None,
+                   search=None, reader=None):
+    """
+    ChangeResult for a shapely lon/lat geometry: every changed patch
+    in the area. See compare() for how the dates are used.
+    """
+
+    grid = make_grid(geometry)
+
+    c = compare(grid, before_date, after_date, change_types, today, search, reader)
+
+    found = patches(c.labels, grid.transform, c.before_idx, c.after_idx)
 
     inside = int(grid.inside.sum())
 
@@ -680,12 +719,94 @@ def detect_changes(geometry, before_date=None, after_date=None,
 
     return ChangeResult(
         observations=observations,
-        before=before.summary(),
-        after=after.summary(),
-        season_gap_days=season_gap_days(before.acquired.date(), after.acquired.date()),
-        clear_fraction_both=round(int(valid.sum()) / inside, 3) if inside else 0.0,
+        before=c.before.summary(),
+        after=c.after.summary(),
+        season_gap_days=season_gap_days(c.before.acquired.date(), c.after.acquired.date()),
+        clear_fraction_both=round(int(c.valid.sum()) / inside, 3) if inside else 0.0,
         area_km2=round(inside * PIXEL_AREA_M2 / 1e6, 2),
     )
+
+
+def measure_parcels(geometries, before_date=None, after_date=None, today=None,
+                    search=None, reader=None):
+    """
+    Share of each parcel's pixels that changed, by change type, for a
+    list of shapely lon/lat geometries (one imagery read for all).
+
+    Returns (parcels, scenes): parcels in input order, each either
+
+        {"measurable": True, "pixels", "clear_pixels",
+         "shares": {change_type: fraction}, "changed_share"}
+
+    or {"measurable": False, "reason"}; scenes describes the two
+    images compared. Raises ChangeDataUnavailable without clear imagery.
+    """
+
+    from rasterio import features
+    from rasterio.warp import transform_geom
+    from shapely.ops import unary_union
+
+    grid = make_grid(unary_union(geometries), max_pixels=MAX_PARCEL_GRID_PIXELS)
+
+    c = compare(grid, before_date, after_date, CHANGE_TYPES, today, search, reader)
+
+    parcels = []
+
+    for geometry in geometries:
+
+        inside = features.rasterize(
+            [transform_geom("EPSG:4326", grid.crs, mapping(geometry))],
+            out_shape=(grid.height, grid.width), transform=grid.transform,
+            fill=0, dtype="uint8",
+        ).astype(bool)
+
+        pixels = int(inside.sum())
+
+        clear = inside & c.valid
+
+        clear_pixels = int(clear.sum())
+
+        if pixels < MIN_PARCEL_PIXELS:
+            plural = "" if pixels == 1 else "s"
+            parcels.append({
+                "measurable": False,
+                "reason": (
+                    f"Too small to measure at 10 m ({pixels} pixel{plural}; "
+                    f"at least {MIN_PARCEL_PIXELS} needed)."
+                ),
+            })
+            continue
+
+        if clear_pixels < max(MIN_PARCEL_PIXELS, MIN_CLEAR_FRACTION * pixels):
+            parcels.append({
+                "measurable": False,
+                "reason": "Clouds covered too much of the parcel in one of the images.",
+            })
+            continue
+
+        shares = {
+            change_type: round(int((clear & (c.labels == k)).sum()) / clear_pixels, 3)
+            for k, change_type in enumerate(CHANGE_TYPES, start=1)
+        }
+
+        parcels.append({
+            "measurable": True,
+            "pixels": pixels,
+            "clear_pixels": clear_pixels,
+            "shares": shares,
+            "changed_share": round(int((clear & (c.labels > 0)).sum()) / clear_pixels, 3),
+        })
+
+    scenes = {
+        "before": c.before.summary(),
+        "after": c.after.summary(),
+        "season_gap_days": season_gap_days(c.before.acquired.date(), c.after.acquired.date()),
+        "method": METHOD,
+        "source": SOURCE_ID,
+        "resolution_m": PIXEL_M,
+    }
+
+    return parcels, scenes
 
 
 # ============================================================

@@ -6,7 +6,11 @@ AnalysisSpec + UseCase
     -> deterministic scoring -> ranking -> decision -> report
 """
 
+from datetime import date, datetime, timezone
+
 from fastapi import HTTPException
+
+from shapely.ops import transform as reproject
 
 import data_registry
 
@@ -373,6 +377,85 @@ def _evidence(use_case, context, satellite_status):
     return evidence
 
 
+def _recent_change(use_case, spec, context, top, originals, emit):
+    """
+    For use cases with a recent_change criterion: compare satellite
+    images over the shortlisted sites only (one read for all) and
+    attach each site's measurement to its candidate. Imagery problems
+    never stop the analysis; they are reported in completeness.
+
+    Returns True if the measurement was attached.
+    """
+
+    if not top or not any(c.evaluator == "recent_change" for c in use_case.criteria):
+        return False
+
+    print("\nSTEP 6b: Checking recent change on the shortlist...")
+
+    proj = context.proj
+
+    shortlist = [originals[candidate_key(c)] for c in top]
+
+    geometries = [
+        reproject(lambda x, y, z=None: proj.to_lonlat(x, y), context.shape_of(c))
+        for c in shortlist
+    ]
+
+    time_range = spec.time_range
+
+    try:
+
+        parcels, scenes = change_detection.measure_parcels(
+            geometries,
+            before_date=date.fromisoformat(time_range.start) if time_range.start else None,
+            after_date=date.fromisoformat(time_range.end) if time_range.end else None,
+        )
+
+    except change_detection.ChangeDataUnavailable as e:
+
+        print("RECENT CHANGE: no clear imagery:", e.reason)
+
+        context.meta["recent_change_problem"] = (
+            f"Recent change on the shortlisted sites could not be checked: {e.reason}"
+        )
+
+        emit("layer", {"id": "historical_imagery", "status": "failed"})
+
+        return False
+
+    except Exception as e:
+
+        print("RECENT CHANGE FAILED:", repr(e))
+
+        context.meta["recent_change_problem"] = (
+            "Recent change on the shortlisted sites could not be checked "
+            f"({type(e).__name__}: {e})."
+        )
+
+        emit("layer", {"id": "historical_imagery", "status": "failed"})
+
+        return False
+
+    for candidate, parcel in zip(shortlist, parcels):
+        candidate["recent_change"] = parcel
+
+    context.layer_status["historical_imagery"] = "loaded"
+
+    context.layer_provenance["historical_imagery"] = {
+        "observed_at": scenes["after"]["acquired_at"],
+        "data_as_of": None,
+        "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+    context.meta["recent_change"] = scenes
+
+    emit("layer", {"id": "historical_imagery", "status": "used"})
+
+    print("STEP 6b COMPLETE")
+
+    return True
+
+
 def _completeness(use_case, area, context, satellite_status):
     """
     Whether the analysis ran everything it planned with the providers
@@ -391,6 +474,7 @@ def _completeness(use_case, area, context, satellite_status):
         c.data_layer
         for c in use_case.criteria
         if c.evaluator
+        and c.weight > 0
         and data_registry.is_available(c.data_layer)
         and not context.has_layer(c.data_layer)
     })
@@ -399,6 +483,9 @@ def _completeness(use_case, area, context, satellite_status):
         reasons.append(
             f"Not loaded for this analysis: {data_registry.layer_label(layer)}."
         )
+
+    if context.meta.get("recent_change_problem"):
+        reasons.append(context.meta["recent_change_problem"])
 
     if area.place_area_km2:
         reasons.append(
@@ -631,6 +718,12 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
     top = scored[:TOP_N]
 
     originals = {candidate_key(c): c for c in candidates}
+
+    if _recent_change(use_case, spec, context, top, originals, emit):
+        top = [
+            score_candidate(originals[candidate_key(c)], spec, use_case, context)
+            for c in top
+        ]
 
     for rank, candidate in enumerate(top, start=1):
 
