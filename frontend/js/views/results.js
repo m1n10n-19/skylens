@@ -141,7 +141,7 @@
               <h1>SkyLens Decision</h1>
               <p class="lead">${subtitle}</p>
               ${r.search_area.description ? `<p class="searched">${SL.icon("pin", 14)} Searched ${SL.esc(r.search_area.description)}</p>` : ""}
-              ${cd ? `<p class="searched">${SL.icon("satellite", 14)} Compared Sentinel-2 images from
+              ${cd ? `<p class="searched">${SL.icon("satellite", 14)} Compared ${SL.esc(cd.sensor || "Sentinel-2")} images (${cd.resolution_m || 10} m) from
                 ${SL.evidence.day(cd.before.date)} and ${SL.evidence.day(cd.after.date)}</p>` : ""}
               <p class="q-echo">"${SL.esc(r.query)}"</p>
               ${partial ? `

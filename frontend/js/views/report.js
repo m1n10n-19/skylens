@@ -47,7 +47,7 @@
             <tr><th>Size filter</th><td>${SL.isNum(an.minimum_area_m2) ? "≥ " + SL.fmt(an.minimum_area_m2) + " m²" : "–"}
               ${SL.isNum(an.maximum_area_m2) ? " and ≤ " + SL.fmt(an.maximum_area_m2) + " m²" : ""}
               ${r.analysis_spec.area.as_stated ? ` (requested: ${SL.esc(r.analysis_spec.area.as_stated)})` : ""}</td></tr>
-            ${cd ? `<tr><th>Imagery compared</th><td class="rp-scene">Sentinel-2 ${SL.esc(cd.before.id)}
+            ${cd ? `<tr><th>Imagery compared</th><td class="rp-scene">${SL.esc(cd.sensor || "Sentinel-2")} (${cd.resolution_m || 10} m): ${SL.esc(cd.before.id)}
               (${SL.evidence.day(cd.before.date)}, ${Math.round(cd.before.clear_fraction * 100)}% clear) and
               ${SL.esc(cd.after.id)} (${SL.evidence.day(cd.after.date)}, ${Math.round(cd.after.clear_fraction * 100)}% clear);
               ${cd.season_gap_days} days apart in the year. ${SL.esc(cd.method)}</td></tr>` : ""}
