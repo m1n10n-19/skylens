@@ -102,6 +102,11 @@ _SHARE = (
     "between the two Sentinel-2 images passed the thresholds"
 )
 
+_DEM = (
+    "Copernicus DEM GLO-30 surface model (includes trees and buildings; "
+    "about ±2 m relative accuracy; acquired 2011-2015)"
+)
+
 _CLOUD = "Pixels classed as clear ground in the scene classification layer"
 
 _ABSENT = (
@@ -228,6 +233,16 @@ MEASUREMENTS = {
     ),
     "water_loss_share": (
         "Share of the site where water receded", "fraction", "measured", _SHARE,
+    ),
+    # Terrain (Copernicus DEM)
+    "elevation_m": (
+        "Surface elevation above sea level (median over the site)", "m", "measured", _DEM,
+    ),
+    "relative_elevation_m": (
+        "Height of the site relative to the ground around it", "m", "measured", _DEM,
+    ),
+    "slope_pct": (
+        "Mean slope across the site", "percent", "measured", _DEM,
     ),
     "season_gap_days": (
         "Difference in time of year between the two scenes", "days", "measured",

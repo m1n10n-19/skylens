@@ -119,7 +119,9 @@ def _ev(client, deepseek, overpass):
     return client.post("/analyze", json={"query": "EV plots in Adyar"}).json()
 
 
-def test_construction_on_shortlisted_site_is_flagged(client, deepseek, overpass, imagery):
+def test_construction_on_shortlisted_site_is_flagged(client, deepseek, overpass, imagery, dem):
+
+    dem()
 
     today = date.today()
 

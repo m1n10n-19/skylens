@@ -25,6 +25,8 @@ import math
 from change_detection import LABELS as CHANGE_LABELS
 from change_detection import PARCEL_ALERT_SHARE
 
+from terrain import LOW_LYING_M, NOISE_M
+
 from geodata import (
     CHARGER_RADIUS_M,
     MAJOR_ROAD_RADIUS_M,
@@ -852,6 +854,61 @@ def recent_change(candidate, context, spec):
     }
 
 
+def terrain(candidate, context, spec):
+    """
+    Elevation, height relative to the surroundings and slope from the
+    Copernicus DEM (terrain.measure_sites, run for the shortlist only).
+    Evidence only: the use cases give it weight 0. Terrain is not a
+    flood-risk measurement.
+    """
+
+    measured = candidate.get("terrain")
+
+    if measured is None:
+        return None
+
+    if not measured["measurable"]:
+        return {"not_measured": measured["reason"]}
+
+    relative = measured["relative_elevation_m"]
+
+    ring = context.meta["terrain"]["ring_m"]
+
+    if abs(relative) < NOISE_M:
+        compared = (
+            f"no meaningful height difference from the ground within {ring} m "
+            f"(within ±{NOISE_M:g} m)"
+        )
+    else:
+        compared = (
+            f"about {abs(relative):.1f} m {'lower' if relative < 0 else 'higher'} "
+            f"than the ground within {ring} m"
+        )
+
+    slope = measured["slope_pct"]
+
+    evidence = (
+        f"Surface about {measured['elevation_m']:.0f} m above sea level; {compared}"
+        + (f"; mean slope {slope:.1f}%" if slope is not None else "")
+    )
+
+    reasons = (
+        [f"Warning: low-lying, about {abs(relative):.1f} m below the ground within {ring} m"]
+        if relative <= -LOW_LYING_M else []
+    )
+
+    return {
+        "score": 100 if relative > -LOW_LYING_M else 30,
+        "evidence": evidence,
+        "reasons": reasons,
+        "measurements": {
+            "elevation_m": measured["elevation_m"],
+            "relative_elevation_m": relative,
+            "slope_pct": slope,
+        },
+    }
+
+
 # ============================================================
 # REGISTRY
 # ============================================================
@@ -874,4 +931,5 @@ EVALUATORS = {
     "changed_area": changed_area,
     "imagery_quality": imagery_quality,
     "recent_change": recent_change,
+    "terrain": terrain,
 }

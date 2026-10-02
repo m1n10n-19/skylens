@@ -98,6 +98,13 @@ VERIFY = {
         "Recent satellite imagery shows change on the site.",
     ),
 
+    "terrain": (
+        "Drainage",
+        "Does water collect on this site in heavy rain, and has it flooded before?",
+        "field_visit",
+        "The site is lower than the ground around it.",
+    ),
+
     # Imagery
     "cause_of_change": (
         "Cause of the change",
@@ -176,10 +183,20 @@ def _site_changed(scored):
     return any((m.get(f"{t}_share") or 0) >= PARCEL_ALERT_SHARE for t in ALERT_CHANGES)
 
 
+def _low_lying(scored):
+
+    from terrain import LOW_LYING_M
+
+    relative = (scored.get("measurements") or {}).get("relative_elevation_m")
+
+    return relative is not None and relative <= -LOW_LYING_M
+
+
 # Verify items listed only when their condition holds for the site;
 # "why" is then the criterion's evidence summary.
 CONDITIONAL = {
     "recent_change": _site_changed,
+    "terrain": _low_lying,
 }
 
 

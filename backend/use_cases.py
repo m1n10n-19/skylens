@@ -263,6 +263,7 @@ EV_CHARGING = UseCase(
         "ev_chargers",
         "flood_risk",
         "historical_imagery",
+        "terrain",
     ),
 
     criteria=(
@@ -339,6 +340,16 @@ EV_CHARGING = UseCase(
             weight=0.0,
             data_layer="historical_imagery",
             evaluator="recent_change",
+        ),
+
+        Criterion(
+            id="terrain",
+            label="Terrain (Copernicus DEM)",
+            # Evidence only: Chennai-area terrain is flat and the
+            # model's ~2 m noise is close to real differences.
+            weight=0.0,
+            data_layer="terrain",
+            evaluator="terrain",
         ),
     ),
 
@@ -422,6 +433,7 @@ COMMERCIAL_SITE_SELECTION = UseCase(
         "parking",
         "population",
         "historical_imagery",
+        "terrain",
     ),
 
     criteria=(
@@ -490,6 +502,16 @@ COMMERCIAL_SITE_SELECTION = UseCase(
             weight=0.0,
             data_layer="historical_imagery",
             evaluator="recent_change",
+        ),
+
+        Criterion(
+            id="terrain",
+            label="Terrain (Copernicus DEM)",
+            # Evidence only: Chennai-area terrain is flat and the
+            # model's ~2 m noise is close to real differences.
+            weight=0.0,
+            data_layer="terrain",
+            evaluator="terrain",
         ),
     ),
 
@@ -564,6 +586,7 @@ LAND_ACQUISITION = UseCase(
         "flood_risk",
         "ownership",
         "historical_imagery",
+        "terrain",
     ),
 
     criteria=(
@@ -624,6 +647,16 @@ LAND_ACQUISITION = UseCase(
             weight=0.0,
             data_layer="historical_imagery",
             evaluator="recent_change",
+        ),
+
+        Criterion(
+            id="terrain",
+            label="Terrain (Copernicus DEM)",
+            # Evidence only: Chennai-area terrain is flat and the
+            # model's ~2 m noise is close to real differences.
+            weight=0.0,
+            data_layer="terrain",
+            evaluator="terrain",
         ),
     ),
 

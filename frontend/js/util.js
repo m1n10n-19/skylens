@@ -140,6 +140,7 @@ window.SL = window.SL || {};
     solar_irradiance: ["Solar irradiance", "sun"],
     shading: ["Shading", "sun"],
     historical_imagery: ["Historical imagery", "satellite"],
+    terrain: ["Terrain", "chart"],
     site_registry: ["Your sites", "folder"],
   };
 

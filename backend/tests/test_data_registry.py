@@ -49,10 +49,21 @@ CHANGED_USE_CASES = {"construction_progress"}
 # BACKWARD COMPATIBILITY
 # ============================================================
 
+# Layers added since the golden file; they may only be appended.
+NEW_LAYERS = {
+    # Phase 2: Copernicus DEM.
+    "terrain": {
+        "label": "Elevation and terrain",
+        "source": "Copernicus DEM (Microsoft Planetary Computer)",
+        "available": True,
+    },
+}
+
+
 def test_legacy_data_layers_are_unchanged():
 
-    assert DATA_LAYERS == {**GOLDEN["data_layers"], **CHANGED_LAYERS}
-    assert list(DATA_LAYERS) == list(GOLDEN["data_layers"])
+    assert DATA_LAYERS == {**GOLDEN["data_layers"], **CHANGED_LAYERS, **NEW_LAYERS}
+    assert list(DATA_LAYERS)[:len(GOLDEN["data_layers"])] == list(GOLDEN["data_layers"])
 
 
 def test_describe_use_case_keeps_every_old_field():

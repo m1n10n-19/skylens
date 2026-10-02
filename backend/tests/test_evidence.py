@@ -89,6 +89,13 @@ def test_every_evaluator_measurement_is_catalogued(land):
 
     context.meta["recent_change"] = {"before": scene, "after": scene}
 
+    candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900, "terrain": {
+        "measurable": True, "elevation_m": 4.0, "surroundings_m": 6.5,
+        "relative_elevation_m": -2.5, "slope_pct": 1.2,
+    }})
+
+    context.meta["terrain"] = {"ring_m": 500}
+
     seen = set()
 
     for name, evaluator in EVALUATORS.items():

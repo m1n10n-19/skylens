@@ -18,6 +18,8 @@ from assessment import assess
 
 import change_detection
 
+import terrain
+
 from buildings import get_buildings_with_provenance
 
 from geodata import (
@@ -458,6 +460,66 @@ def _recent_change(use_case, spec, context, top, originals, emit):
     return True
 
 
+def _terrain(use_case, context, top, originals, emit):
+    """
+    For use cases with a terrain criterion: read the Copernicus DEM
+    once around the shortlisted sites and attach each site's terrain.
+    Problems never stop the analysis; they are reported in
+    completeness. Returns True if terrain was attached.
+    """
+
+    if not top or not any(c.evaluator == "terrain" for c in use_case.criteria):
+        return False
+
+    print("\nSTEP 6c: Measuring terrain on the shortlist...")
+
+    proj = context.proj
+
+    to_lonlat = lambda shape: reproject(lambda x, y, z=None: proj.to_lonlat(x, y), shape)
+
+    shortlist = [originals[candidate_key(c)] for c in top]
+
+    sites = []
+
+    for candidate in shortlist:
+        shape = context.shape_of(candidate)
+        sites.append((
+            to_lonlat(shape),
+            to_lonlat(shape.buffer(terrain.RING_M)),
+            candidate.get("site_kind") == "building",
+        ))
+
+    try:
+        results, info = terrain.measure_sites(sites)
+    except Exception as e:
+        print("TERRAIN FAILED:", repr(e))
+        context.meta["terrain_problem"] = (
+            f"Terrain on the shortlisted sites could not be measured ({type(e).__name__}: {e})."
+        )
+        emit("layer", {"id": "terrain", "status": "failed"})
+        return False
+
+    for candidate, result in zip(shortlist, results):
+        candidate["terrain"] = result
+
+    context.layer_status["terrain"] = "loaded"
+
+    context.layer_provenance["terrain"] = {
+        "source_id": info["source"],
+        "observed_at": None,
+        "data_as_of": None,
+        "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+    context.meta["terrain"] = info
+
+    emit("layer", {"id": "terrain", "status": "used"})
+
+    print("STEP 6c COMPLETE")
+
+    return True
+
+
 def _completeness(use_case, area, context, satellite_status):
     """
     Whether the analysis ran everything it planned with the providers
@@ -486,8 +548,9 @@ def _completeness(use_case, area, context, satellite_status):
             f"Not loaded for this analysis: {data_registry.layer_label(layer)}."
         )
 
-    if context.meta.get("recent_change_problem"):
-        reasons.append(context.meta["recent_change_problem"])
+    for problem in ("recent_change_problem", "terrain_problem"):
+        if context.meta.get(problem):
+            reasons.append(context.meta[problem])
 
     if area.place_area_km2:
         reasons.append(
@@ -721,7 +784,10 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     originals = {candidate_key(c): c for c in candidates}
 
-    if _recent_change(use_case, spec, context, top, originals, emit):
+    changed = _recent_change(use_case, spec, context, top, originals, emit)
+
+    # Both always run; rescore once if either attached evidence.
+    if _terrain(use_case, context, top, originals, emit) or changed:
         top = [
             score_candidate(originals[candidate_key(c)], spec, use_case, context)
             for c in top

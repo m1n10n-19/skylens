@@ -179,6 +179,36 @@ LANDSAT_PC = DataSource(
 )
 
 
+COPERNICUS_DEM_PC = DataSource(
+
+    id="copernicus_dem_glo30_planetary_computer",
+
+    name="Copernicus DEM (Microsoft Planetary Computer)",
+
+    provider="Copernicus DEM GLO-30 (ESA / Airbus, TanDEM-X), via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="30 m",
+
+    temporal_resolution="Single release; radar data acquired 2011-2015",
+
+    coverage="Global land",
+
+    freshness="Static: earthworks and landfill after 2015 do not appear",
+
+    cost="free",
+
+    latency="A few seconds per area",
+
+    license="Copernicus DEM licence (free use with attribution)",
+
+    limitations=(
+        "Surface model: includes buildings and trees, so on built-up land it measures roofs.",
+        "About ±2 m relative and ±4 m absolute vertical accuracy.",
+        "Terrain, not flood risk: it shows where ground is low, not how often it floods.",
+    ),
+)
+
+
 SOURCES = {
 
     source.id: source
@@ -187,6 +217,7 @@ SOURCES = {
         OSM_OVERPASS,
         SENTINEL_2_PC,
         LANDSAT_PC,
+        COPERNICUS_DEM_PC,
     )
 }
 
@@ -330,6 +361,18 @@ _LAYERS = (
         id="site_registry",
         label="Customer's registered sites",
         capabilities=("customer_sites",),
+    ),
+
+    DataLayer(
+        id="terrain",
+        label="Elevation and terrain",
+        source="copernicus_dem_glo30_planetary_computer",
+        capabilities=("terrain", "elevation", "slope", "low_lying_land"),
+        limitations=(
+            "Not measurable on buildings: the surface model measures roofs.",
+            "Differences under about 2 m are within the model's accuracy.",
+            "Low-lying is not flood risk; drainage and flood history need verification.",
+        ),
     ),
 )
 

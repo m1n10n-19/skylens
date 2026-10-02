@@ -14,6 +14,7 @@ Last reviewed: October 2026.
 | OpenStreetMap via Overpass | Roads, buildings, POIs, land-use tags, EV chargers, parking | Public Overpass servers; cached 24 h (`overpass.py`) |
 | Sentinel-2 L2A (Microsoft Planetary Computer) | Change detection from 2017, recent change on shortlisted sites, context imagery | STAC `sentinel-2-l2a`; 10 m; free, no key |
 | Landsat Collection 2 Level-2 (Microsoft Planetary Computer) | Change detection for periods before 2017 (back to 1984) | STAC `landsat-c2-l2`; 30 m; free, no key. Landsat 7 after May 2003 is a last resort (permanent data gaps) |
+| Copernicus DEM GLO-30 (Microsoft Planetary Computer) | Elevation, height relative to surroundings and slope of shortlisted open-land sites; low-lying warning (evidence only, not scored) | STAC `cop-dem-glo-30`; 30 m; free, no key. Surface model (roofs and trees included), so buildings are not measured; ±2 m relative accuracy; data from 2011-2015. Not flood risk |
 
 ## Candidates
 
@@ -22,7 +23,7 @@ SkyLens already uses: no new account, key or dependency.
 
 | Source | Value for SkyLens | Access | Notes |
 |---|---|---|---|
-| Copernicus DEM / NASADEM (SRTM) | High: elevation, slope, low-lying land | On Planetary Computer (`cop-dem-glo-30`, `nasadem`) | Terrain, not flood risk: label as "low-lying", never "flood risk" |
+| NASADEM (SRTM) | Low: older alternative to the Copernicus DEM now in use | On Planetary Computer (`nasadem`) | |
 | Sentinel-1 radar | High: sees through clouds (monsoon gaps), flood and water mapping | On Planetary Computer (`sentinel-1-rtc`, `sentinel-1-grd`) | Different physics from optical; needs its own thresholds |
 | JRC Global Surface Water | High: where water has occurred since 1984 (flood history) | On Planetary Computer (`jrc-gsw`) | |
 | ESA WorldCover / Esri land cover | Medium: annual land-cover classes, cross-check for spectral change | On Planetary Computer (`esa-worldcover`, `io-lulc-annual-v02`) | 1-2 years behind |
@@ -38,11 +39,10 @@ SkyLens already uses: no new account, key or dependency.
 
 ## Suggested order
 
-1. Copernicus DEM (terrain and low-lying land).
-2. Sentinel-1 and JRC Global Surface Water (flood and water evidence that works through clouds).
-3. Open Charge Map (EV competition).
-4. WorldPop (population around commercial sites).
-5. Check access for TNGIS and India-WRIS before planning work on them.
+1. Sentinel-1 and JRC Global Surface Water (flood and water evidence that works through clouds).
+2. Open Charge Map (EV competition).
+3. WorldPop (population around commercial sites).
+4. Check access for TNGIS and India-WRIS before planning work on them.
 
 ## Adding a source
 

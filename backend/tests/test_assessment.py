@@ -293,13 +293,14 @@ def test_analyze_attaches_assessment_to_ranked_candidates(client, deepseek, over
         assert [k["id"] for k in assessment["known"]] == measured
 
 
-def test_complete_run(client, deepseek, overpass, imagery):
+def test_complete_run(client, deepseek, overpass, imagery, dem):
 
     from tests.conftest import clear_year
 
     deepseek(planner_reply("land_acquisition"))
     overpass(land_elements())
     imagery(clear_year())
+    dem()
 
     body = client.post("/analyze", json={"query": "land in Adyar"}).json()
 

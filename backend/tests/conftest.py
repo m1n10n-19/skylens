@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 import buildings
 import change_detection
 import geodata
+import terrain
 import main
 import pipeline
 import ratelimit
@@ -446,6 +447,8 @@ def isolated_env(monkeypatch):
     monkeypatch.setattr(main, "search_satellite", no_network)
     monkeypatch.setattr(change_detection, "search_scenes", no_network)
     monkeypatch.setattr(change_detection, "read_band", no_network)
+    monkeypatch.setattr(terrain, "search_tiles", no_network)
+    monkeypatch.setattr(terrain, "read_dem", no_network)
 
     yield
 
@@ -510,6 +513,52 @@ def imagery(monkeypatch):
         fake = FakeImagery(scenes)
         monkeypatch.setattr(change_detection, "search_scenes", fake.search)
         monkeypatch.setattr(change_detection, "read_band", fake.reader)
+        return fake
+
+    return install
+
+
+class FakeDem:
+    """
+    One DEM tile: flat ground at `ground` metres, with an optional
+    square depression (`low_by` metres lower) around the search centre
+    within `radius_m`.
+    """
+
+    def __init__(self, ground=6.0, low_by=0.0, radius_m=100):
+        self.ground = ground
+        self.low_by = low_by
+        self.radius_m = radius_m
+        self.reads = 0
+
+    def search(self, bbox):
+        return [type("Tile", (), {"id": "Copernicus_DSM_TEST", "assets": {"data": FakeAsset("dem")}})()]
+
+    def reader(self, href, grid):
+        from rasterio.warp import transform as warp
+
+        self.reads += 1
+        out = np.full((grid.height, grid.width), self.ground, dtype="float32")
+        if self.low_by:
+            (x,), (y,) = warp("EPSG:4326", grid.crs, [LON], [LAT])
+            col = (x - grid.transform.c) / grid.pixel_m
+            row = (grid.transform.f - y) / grid.pixel_m
+            r = self.radius_m / grid.pixel_m
+            rows, cols = np.mgrid[0:grid.height, 0:grid.width]
+            out[(abs(rows - row) <= r) & (abs(cols - col) <= r)] -= self.low_by
+        return out
+
+
+@pytest.fixture
+def dem(monkeypatch):
+    """
+    dem(ground=..., low_by=...) installs a fake Copernicus DEM.
+    """
+
+    def install(**kwargs):
+        fake = FakeDem(**kwargs)
+        monkeypatch.setattr(terrain, "search_tiles", fake.search)
+        monkeypatch.setattr(terrain, "read_dem", fake.reader)
         return fake
 
     return install
