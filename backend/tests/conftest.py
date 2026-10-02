@@ -25,6 +25,7 @@ import flood
 import geodata
 import landcover
 import ml_buildings
+import web_research
 import terrain
 import main
 import pipeline
@@ -424,7 +425,7 @@ def clear_year(cleared=False):
 # ============================================================
 
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch):
+def isolated_env(monkeypatch, tmp_path):
     """
     No login, no question limit, fresh rate-limit counters, and no
     real network providers, whatever the local .env says.
@@ -434,6 +435,10 @@ def isolated_env(monkeypatch):
     monkeypatch.delenv("SKYLENS_PASSWORD", raising=False)
     monkeypatch.setenv("RATE_LIMIT_PER_IP", "0")
     monkeypatch.setenv("RATE_LIMIT_DAILY_TOTAL", "0")
+
+    # Never spend real web-search credits in tests.
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr(web_research, "CACHE_DIR", str(tmp_path / "web"))
 
     ratelimit._by_ip.clear()
     ratelimit._total.clear()

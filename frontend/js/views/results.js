@@ -215,6 +215,15 @@
             <a class="btn-outline" href="#/next/${id}">What next? ${SL.icon("arrowRight", 16)}</a>
           </div>
 
+          <section class="card web-card" id="web">
+            <div class="card-head"><span>What's reported about this area</span>
+              ${r.web_research ? "" : `<button class="btn-outline" id="web-run">${SL.icon("search", 16)} Check the web</button>`}</div>
+            <div id="web-body">${r.web_research ? SL.webFindingsHTML(r.web_research)
+              : `<p class="muted sm">Search news and government pages for infrastructure projects, flooding and
+                  land issues around ${SL.esc(SL.shortPlace(r.resolved_location && r.resolved_location.name))}.
+                  Results are quoted with their sources and are not verified. Uses one question.</p>`}</div>
+          </section>
+
           <details class="card limits">
             <summary>What this analysis does not tell you</summary>
             <ul>${(r.limitations || []).map(l => `<li>${SL.esc(l)}</li>`).join("")}</ul>
@@ -241,6 +250,30 @@
       this.closeMenu = () => { menu.hidden = true; more.setAttribute("aria-expanded", "false"); };
       document.addEventListener("click", this.closeMenu);
       SL.$("#dl", el).onclick = () => downloadJSON(r);
+
+      const webRun = SL.$("#web-run", el);
+      if (webRun) {
+        webRun.onclick = async () => {
+          webRun.disabled = true;
+          webRun.textContent = "Searching…";
+          try {
+            r.web_research = await SL.research(
+              (r.analysis_spec && r.analysis_spec.location) || (r.resolved_location && r.resolved_location.name),
+              uc.id,
+            );
+            if (r.web_research.status === "success") SL.store.useQuestion();
+            SL.store.update(id, r);
+            SL.renderHeader();
+            SL.$("#web-body", el).innerHTML = SL.webFindingsHTML(r.web_research);
+            webRun.remove();
+          } catch (error) {
+            webRun.disabled = false;
+            webRun.textContent = "Check the web";
+            SL.$("#web-body", el).innerHTML = `<p class="notice">${SL.esc(error.text ||
+              (error.stage === "rate_limit" ? "You have used all your free questions." : "Web research failed. Try again."))}</p>`;
+          }
+        };
+      }
 
       // ---- map: the searched area, then the ranked sites
       const map = this.map = SL.maps.create(SL.$("#res-map", el), {zoomControl: true});

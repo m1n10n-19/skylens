@@ -354,6 +354,35 @@ MS_BUILDINGS_PC = DataSource(
 )
 
 
+TAVILY = DataSource(
+
+    id="tavily_web_search",
+
+    name="Tavily web search",
+
+    provider="Tavily search API (configured with TAVILY_API_KEY; see web_research.py)",
+
+    spatial_resolution="Place names only",
+
+    temporal_resolution="Whatever the pages report",
+
+    coverage="Public web pages and news",
+
+    freshness="Searches cached for 24 hours",
+
+    cost="metered",
+
+    latency="A few seconds per search; 3 searches per request",
+
+    license="Each page's own terms; quoted briefly with a link",
+
+    limitations=(
+        "Reported claims, not measurements: never scored or verified by SkyLens.",
+        "Used only when the user asks; only the place name and topic are sent.",
+    ),
+)
+
+
 SOURCES = {
 
     source.id: source
@@ -368,6 +397,7 @@ SOURCES = {
         NASA_POWER,
         ESA_WORLDCOVER_PC,
         MS_BUILDINGS_PC,
+        TAVILY,
     )
 }
 

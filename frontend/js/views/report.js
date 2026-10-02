@@ -102,6 +102,10 @@
               <td>${ranks.map(n => "#" + n).join(", ")}</td></tr>`).join("")}</tbody>
           </table>` : ""}
 
+          ${r.web_research && r.web_research.status === "success" ? `
+          <h2>What's reported about this area (web)</h2>
+          <div class="rp-web">${SL.webFindingsHTML(r.web_research)}</div>` : ""}
+
           <h2>Data used</h2>
           <ul>${(r.evidence || []).map(e => {
             const d = dates[e.id] || {};

@@ -217,6 +217,38 @@
     day,
   };
 
+  // ---------------------------------------------------------- web findings
+
+  const WEB_TYPES = {government: "Government", news: "News", web: "Web"};
+
+  SL.webFindingsHTML = research => {
+    if (!research) return "";
+    if (research.status !== "success") {
+      return `<p class="muted sm">${SL.esc(research.message || "Web research could not be run.")}</p>`;
+    }
+    if (!research.findings.length) {
+      return `<p class="muted sm">No web pages mentioning ${SL.esc(research.place)} were found for these topics.</p>`;
+    }
+    const groups = {};
+    research.findings.forEach(f => { (groups[f.topic_label] = groups[f.topic_label] || []).push(f); });
+    return `
+      <p class="muted sm">${SL.esc(research.note)}</p>
+      ${Object.entries(groups).map(([label, items]) => `
+        <h4 class="web-topic">${SL.esc(label)}</h4>
+        <ul class="web-list">${items.map(f => `
+          <li>
+            ${f.quotes.map(q => `<blockquote>“${SL.esc(q)}”</blockquote>`).join("")}
+            <div class="web-src">
+              <span class="basis basis-observed" title="Claimed by the source; not verified by SkyLens">Reported</span>
+              <a class="link" href="${SL.esc(f.url)}" target="_blank" rel="noopener noreferrer">${SL.esc(f.title || f.domain)}</a>
+              · ${SL.esc(WEB_TYPES[f.source_type] || f.source_type)} · ${SL.esc(f.domain || "")}
+              ${f.published_at ? (f.date_source === "url" ? ` · published ${SL.evidence.day(f.published_at)}`
+                : ` · dated ${SL.evidence.day(f.published_at)} by the search provider`) : " · no publication date"}
+              · retrieved ${SL.evidence.day(f.retrieved_at)}
+            </div>
+          </li>`).join("")}</ul>`).join("")}`;
+  };
+
   SL.facts = {
 
     level,

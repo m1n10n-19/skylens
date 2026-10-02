@@ -13,6 +13,8 @@ Statuses:
     observed               read directly from the source and not
                            verified (e.g. an OSM land-use tag)
     inferred               derived from several observations
+    reported               claimed by an outside source (e.g. a web
+                           page, see web_research.py), not verified
     not_measured           no evidence: the layer is unavailable or
                            the value could not be measured
     verification_required  remote evidence cannot settle it
@@ -33,6 +35,7 @@ Status = Literal[
     "measured",
     "observed",
     "inferred",
+    "reported",
     "not_measured",
     "verification_required",
 ]

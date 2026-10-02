@@ -345,6 +345,14 @@ p { margin: 0 0 10px; }
 .basis-inferred { color: var(--muted); }
 .basis-observed { color: var(--amber); }
 
+.web-card { margin-top: 12px; }
+.web-topic { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+.web-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.web-list blockquote { margin: 0 0 4px; padding-left: 10px; border-left: 2px solid var(--line-2); font-size: 14px; overflow-wrap: anywhere; }
+.web-src { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.report .web-list blockquote { border-color: #d7dcd8; }
+.report .web-src, .report .web-topic { color: #5b6760; }
+
 .verify-card h3 { margin-bottom: 4px; }
 .verify { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
 .verify li::marker { color: var(--dim); font-size: 13px; }

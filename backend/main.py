@@ -49,6 +49,8 @@ import auth
 
 import ratelimit
 
+import web_research
+
 
 # ============================================================
 # ENVIRONMENT
@@ -1116,6 +1118,40 @@ def analyze_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"}
     )
+
+
+# ============================================================
+# WEB RESEARCH (on request; see web_research.py)
+# ============================================================
+
+class ResearchRequest(BaseModel):
+
+    # Place text, e.g. the analysis's location.
+    location: str
+
+    # Use case id, to pick the analysis-specific search topic.
+    use_case: Optional[str] = None
+
+
+@app.post("/research")
+def research(
+    request: ResearchRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(default=None)
+):
+    """
+    What web sources report about a place: exact quotes with URL,
+    title and dates. Not scored, not verified. Counts against the
+    anonymous question limit when a provider is connected (searches
+    cost credits).
+    """
+
+    provider = web_research.provider_from_env()
+
+    if provider is not None:
+        enforce_question_limit(http_request, authorization)
+
+    return web_research.research(request.location, request.use_case, provider)
 
 
 # ============================================================

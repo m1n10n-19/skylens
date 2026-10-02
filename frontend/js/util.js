@@ -225,6 +225,21 @@ window.SL = window.SL || {};
       return id;
     },
 
+    // A web check that ran counts as a question, as on the server.
+    useQuestion() {
+      load();
+      if (!SL.unlimited()) memory.used += 1;
+      save();
+    },
+
+    // Store changes to a saved result (e.g. web findings added later).
+    update(id, result) {
+      load();
+      if (!memory.results[id]) return;
+      memory.results[id] = result;
+      save();
+    },
+
     clearHistory() {
       load();
       memory.history = [];
