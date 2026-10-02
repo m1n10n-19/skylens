@@ -230,7 +230,7 @@ def assess(scored, use_case):
             "id": item_id,
             "label": _label(item_id),
             "state": "not_assessed",
-            "reason": "Not assessed by SkyLens.",
+            "reason": "SkyLens has no data for this.",
         })
 
         if item_id in VERIFY:

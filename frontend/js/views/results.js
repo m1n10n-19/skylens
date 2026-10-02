@@ -100,6 +100,8 @@
       const place = SL.shortPlace(r.resolved_location && r.resolved_location.name);
       const noun = String(an.candidate_type || "site").replace(/_/g, " ");
       const t = top[0];
+      const partial = r.completeness && r.completeness.status === "partial" ? r.completeness.reasons : null;
+      const toVerify = t && SL.evidence.has(t) ? t.assessment.verify.length : 0;
 
       const subtitle = top.length
         ? `${top.length} ${WHAT[uc.id] || "sites"} ranked in ${SL.esc(place)}, from
@@ -115,6 +117,11 @@
               <p class="lead">${subtitle}</p>
               ${r.search_area.description ? `<p class="searched">${SL.icon("pin", 14)} Searched ${SL.esc(r.search_area.description)}</p>` : ""}
               <p class="q-echo">"${SL.esc(r.query)}"</p>
+              ${partial ? `
+              <div class="partial" role="status">
+                <b>Partial result.</b> Some data couldn't be collected, so this answer may be incomplete:
+                <ul>${partial.map(x => `<li>${SL.esc(x)}</li>`).join("")}</ul>
+              </div>` : ""}
             </div>
             <div class="head-actions">
               <a class="btn-outline" href="#/report/${id}">${SL.icon("file", 16)} Export Report</a>
@@ -171,6 +178,9 @@
             <div>
               <div class="muted sm">Recommended action</div>
               <p>${SL.esc(r.decision.recommended_action)}</p>
+              ${toVerify ? `<p class="sm">Before committing to site #1, check
+                <a class="link" href="#/site/${id}/1">${toVerify} thing${toVerify === 1 ? "" : "s"}</a>
+                that remote data can't settle.</p>` : ""}
               <p class="muted sm">Scores use measured evidence only
                 (${Math.round((an.evidence_coverage || 0) * 100)}% of the criteria weight for the top site).
                 Anything SkyLens has no data for is listed below, never estimated.</p>
