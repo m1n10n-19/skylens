@@ -90,6 +90,15 @@ _COUNT = "Count of mapped features within the stated distance of the candidate o
 
 _TAG = "Read from the OpenStreetMap tag; not verified on imagery or the ground"
 
+_INDEX = (
+    "Mean over the patch of a normalized-difference index from Sentinel-2 "
+    "surface reflectance (see the analysis method)"
+)
+
+_SCENE = "From the Sentinel-2 scene metadata"
+
+_CLOUD = "Pixels classed as clear ground in the scene classification layer"
+
 _ABSENT = (
     "None mapped within the search distance. Absence from the map "
     "does not prove absence on the ground."
@@ -166,6 +175,39 @@ MEASUREMENTS = {
     "distance_to_centre_m": (
         "Distance from the centre of the searched place", "m", "measured", _DISTANCE,
     ),
+
+    # Change (Sentinel-2)
+    "changed_area_m2": (
+        "Area of detected change", "m2", "measured",
+        "10 m pixels whose spectral index change passed the thresholds, x 100 m²",
+    ),
+    "index_before": (
+        "Mean spectral index in the earlier scene", "index", "measured", _INDEX,
+    ),
+    "index_after": (
+        "Mean spectral index in the later scene", "index", "measured", _INDEX,
+    ),
+    "index_delta": (
+        "Mean change in the spectral index", "index", "measured", _INDEX,
+    ),
+    "before_scene_date": (
+        "Acquisition date of the earlier scene", None, "observed", _SCENE,
+    ),
+    "after_scene_date": (
+        "Acquisition date of the later scene", None, "observed", _SCENE,
+    ),
+    "clear_fraction_before": (
+        "Share of the searched area clear of cloud in the earlier scene", "fraction",
+        "measured", _CLOUD,
+    ),
+    "clear_fraction_after": (
+        "Share of the searched area clear of cloud in the later scene", "fraction",
+        "measured", _CLOUD,
+    ),
+    "season_gap_days": (
+        "Difference in time of year between the two scenes", "days", "measured",
+        "Days between the scenes' positions in the calendar year",
+    ),
 }
 
 
@@ -183,6 +225,7 @@ def _source_fields(layer_id, provenance):
         "layer": layer_id,
         "source": data_registry.source_label(layer_id),
         "source_id": source.id if source else None,
+        "observed_at": provenance.get("observed_at"),
         "data_as_of": provenance.get("data_as_of"),
         "retrieved_at": provenance.get("retrieved_at"),
     }

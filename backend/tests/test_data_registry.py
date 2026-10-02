@@ -29,13 +29,29 @@ GOLDEN = json.load(open(
 ))
 
 
+# Deliberate changes since the golden file was frozen. Anything not
+# listed here must be unchanged.
+CHANGED_LAYERS = {
+    # Phase 2: Sentinel-2 change detection.
+    "historical_imagery": {
+        "label": "Historical imagery comparison",
+        "source": "Microsoft Planetary Computer",
+        "available": True,
+    },
+}
+
+# Phase 2: construction_progress became the implemented
+# land-and-construction change module.
+CHANGED_USE_CASES = {"construction_progress"}
+
+
 # ============================================================
 # BACKWARD COMPATIBILITY
 # ============================================================
 
 def test_legacy_data_layers_are_unchanged():
 
-    assert DATA_LAYERS == GOLDEN["data_layers"]
+    assert DATA_LAYERS == {**GOLDEN["data_layers"], **CHANGED_LAYERS}
     assert list(DATA_LAYERS) == list(GOLDEN["data_layers"])
 
 
@@ -46,6 +62,9 @@ def test_describe_use_case_keeps_every_old_field():
         new = describe_use_case(use_case)
 
         assert set(old) <= set(new)
+
+        if use_case.id in CHANGED_USE_CASES:
+            continue
 
         for key, value in old.items():
 

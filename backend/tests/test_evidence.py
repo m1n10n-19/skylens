@@ -70,8 +70,15 @@ def test_every_evaluator_measurement_is_catalogued(land):
         AnalysisSpec(query="q", intent_type="x", area=AreaRequirement(min_m2=1000)),
     ]
 
+    scene = {"date": "2026-01-10", "clear_fraction": 0.9}
+
     candidates = list(by_id.values()) + [
         {"latitude": LAT, "longitude": LON, "area_m2": 2500, "building_type": "commercial"},
+        {"latitude": LAT, "longitude": LON, "area_m2": 1200, "change": {
+            "index": "NDVI", "before_mean": 0.7, "after_mean": 0.3, "delta_mean": -0.4,
+            "min_change": 0.25, "full_scale": 0.8, "pixels": 12, "before": scene, "after": scene,
+            "season_gap_days": 10,
+        }},
     ]
 
     seen = set()

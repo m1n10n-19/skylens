@@ -275,7 +275,18 @@ _LAYERS = (
     DataLayer(
         id="historical_imagery",
         label="Historical imagery comparison",
-        capabilities=("historical_change",),
+        source="sentinel_2_planetary_computer",
+        capabilities=(
+            "historical_change",
+            "vegetation_change",
+            "construction_change",
+            "water_change",
+        ),
+        limitations=(
+            "Two-date spectral comparison at 10 m; changes under about 500 m² are not detected.",
+            "Shows that a surface changed, not why: construction, clearing, farming and flooding can look alike.",
+            "Imagery starts in 2017 (Sentinel-2 L2A).",
+        ),
     ),
 
     DataLayer(

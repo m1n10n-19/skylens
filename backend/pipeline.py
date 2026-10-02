@@ -12,6 +12,8 @@ import data_registry
 
 from assessment import assess
 
+import change_detection
+
 from buildings import get_buildings_with_provenance
 
 from geodata import (
@@ -155,9 +157,48 @@ def area_too_large_response(query, intent, spec, use_case, error):
     }
 
 
+def data_unavailable_response(query, intent, spec, use_case, area, error):
+
+    return {
+
+        "status": "data_unavailable",
+
+        "query": query,
+
+        "intent": intent,
+
+        "analysis_spec": spec.model_dump(),
+
+        "use_case": describe_use_case(use_case),
+
+        "message": (
+            "SkyLens could not find clear enough satellite imagery to "
+            "compare for this place and period, so no change has been "
+            "measured. " + error.reason
+        ),
+
+        "suggestions": [
+            "Try a different period: monsoon months are often cloudy.",
+            "Ask about a longer period, e.g. \"since 2023\".",
+        ],
+
+        "search_area": area.public(),
+
+        "scenes_checked": error.tried,
+    }
+
+
 # ============================================================
 # HELPERS
 # ============================================================
+
+def candidate_key(candidate):
+    """
+    Identity of a candidate: its id, or its OSM type and id.
+    """
+
+    return candidate.get("candidate_id") or (candidate.get("osm_type"), candidate.get("osm_id"))
+
 
 def area_filter(spec, use_case):
     """
@@ -210,10 +251,12 @@ def _satellite(latitude, longitude, radius_km):
     return satellite, "loaded"
 
 
-def _candidates(use_case, area, minimum, maximum, place):
+def _candidates(use_case, spec, area, minimum, maximum, place):
     """
     Candidates plus the scoring context. For land and sites the
-    context layers come from the same Overpass request.
+    context layers come from the same Overpass request; for changes
+    the candidates are patches found by comparing satellite scenes.
+    Raises ChangeDataUnavailable when no clear imagery exists.
     """
 
     print(
@@ -223,7 +266,7 @@ def _candidates(use_case, area, minimum, maximum, place):
 
     source = use_case.candidate_source
 
-    stage = "building_data" if source == "buildings" else "candidate_data"
+    stage = {"buildings": "building_data", "changes": "imagery_data"}.get(source, "candidate_data")
 
     try:
 
@@ -250,6 +293,12 @@ def _candidates(use_case, area, minimum, maximum, place):
 
             context.layer_provenance["building_footprints"] = provenance
 
+        elif source == "changes":
+
+            candidates, context = change_detection.collect_changes(
+                area, spec, place, min_area_m2=minimum,
+            )
+
         else:
 
             layers = {
@@ -263,6 +312,9 @@ def _candidates(use_case, area, minimum, maximum, place):
             candidates, context = collect_candidates_and_context(
                 source, area, minimum, maximum, layers, place
             )
+
+    except change_detection.ChangeDataUnavailable:
+        raise
 
     except Exception as e:
 
@@ -360,7 +412,40 @@ def _completeness(use_case, area, context, satellite_status):
     }
 
 
-def _decision(use_case, scored, top):
+def _change_decision(use_case, scored, top, context):
+
+    meta = context.meta["change_detection"]
+
+    period = f"between {meta['before']['date']} and {meta['after']['date']}"
+
+    if not scored:
+        return {
+            "summary": (
+                f"No change above the detection thresholds was found {period}. "
+                "This does not rule out changes smaller than about 500 m²."
+            ),
+            "recommended_action": (
+                "Try a longer period, or check smaller sites on "
+                "high-resolution imagery."
+            ),
+            "confidence": "low",
+        }
+
+    return {
+        "summary": (
+            f"Found {len(scored)} changed areas {period}. The top {len(top)} "
+            f"are ranked by how strong and how large the change is, and "
+            f"how comparable the two images are."
+        ),
+        "recommended_action": use_case.recommended_action,
+        "confidence": top[0]["confidence"],
+    }
+
+
+def _decision(use_case, scored, top, context=None):
+
+    if use_case.candidate_source == "changes":
+        return _change_decision(use_case, scored, top, context)
 
     noun = use_case.candidate_noun
 
@@ -475,7 +560,11 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     place = spec.location.split(",")[0].strip()
 
-    candidates, context = _candidates(use_case, area, minimum, maximum, place)
+    try:
+        candidates, context = _candidates(use_case, spec, area, minimum, maximum, place)
+    except change_detection.ChangeDataUnavailable as e:
+        print("NO CLEAR IMAGERY:", e.reason)
+        return data_unavailable_response(query, intent, spec, use_case, area, e)
 
     for layer in context.layer_status:
         emit("layer", {"id": layer, "status": "used"})
@@ -541,14 +630,11 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     top = scored[:TOP_N]
 
-    originals = {
-        (c.get("osm_type"), c.get("osm_id")): c
-        for c in candidates
-    }
+    originals = {candidate_key(c): c for c in candidates}
 
     for rank, candidate in enumerate(top, start=1):
 
-        original = originals[(candidate.get("osm_type"), candidate.get("osm_id"))]
+        original = originals[candidate_key(candidate)]
 
         candidate["rank"] = rank
 
@@ -571,7 +657,7 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     print("\nSTEP 7: Creating final decision...")
 
-    decision = _decision(use_case, scored, top)
+    decision = _decision(use_case, scored, top, context)
 
     evidence = _evidence(use_case, context, satellite_status)
 
@@ -589,6 +675,15 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         ] + list(use_case.unassessed)
 
     limitations = [f"Searched {area.description}."] + list(use_case.limitations)
+
+    change_meta = context.meta.get("change_detection")
+
+    if change_meta:
+        limitations.insert(1, (
+            f"Compared Sentinel-2 scenes from {change_meta['before']['date']} and "
+            f"{change_meta['after']['date']} ({change_meta['season_gap_days']} days "
+            f"apart in the year)."
+        ))
 
     # Map data failures abort the analysis (502), so imagery is the
     # only layer that can be missing from a successful report.
@@ -650,4 +745,7 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         "limitations": limitations,
 
         "completeness": _completeness(use_case, area, context, satellite_status),
+
+        # Which imagery a change analysis compared; absent otherwise.
+        **({"change_detection": change_meta} if change_meta else {}),
     }

@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import buildings
+import change_detection
 import geodata
 import main
 import pipeline
@@ -316,6 +317,8 @@ def isolated_env(monkeypatch):
     monkeypatch.setattr(pipeline, "get_latest_satellite", lambda **kw: dict(FAKE_SCENE))
     monkeypatch.setattr(main, "get_latest_satellite", no_network)
     monkeypatch.setattr(main, "search_satellite", no_network)
+    monkeypatch.setattr(change_detection, "search_scenes", no_network)
+    monkeypatch.setattr(change_detection, "read_band", no_network)
 
     yield
 

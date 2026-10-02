@@ -77,6 +77,12 @@ VERIFY = {
         "records_check",
         "No flood risk data is connected.",
     ),
+    "permits": (
+        "Permits",
+        "Is the change covered by building or land-use permits?",
+        "records_check",
+        "Permits are not assessed by SkyLens.",
+    ),
     "grid_connection_capacity": (
         "Grid connection capacity",
         "Is there enough grid capacity at this site for the planned load?",
@@ -85,6 +91,12 @@ VERIFY = {
     ),
 
     # Imagery
+    "cause_of_change": (
+        "Cause of the change",
+        "What actually changed on the ground: construction, clearing, farming or flooding?",
+        "imagery_review",
+        "10 m spectral change cannot tell these causes apart.",
+    ),
     "footprint_size": (
         "Usable roof area",
         "How much of the roof is usable for panels?",

@@ -174,16 +174,27 @@ def test_analyze_unsupported_use_case(client, deepseek):
     assert len(body["supported_use_cases"]) == 5
 
 
-def test_analyze_not_yet_implemented_produces_no_result(client, deepseek):
+def test_analyze_not_yet_implemented_produces_no_result(client, deepseek, monkeypatch):
 
-    deepseek(planner_reply("construction_progress"))
+    import dataclasses
+    import use_cases
 
-    body = client.post("/analyze", json={"query": "what changed?"}).json()
+    # Every registered module is implemented now; register a placeholder.
+    placeholder = dataclasses.replace(
+        use_cases.LAND_ACQUISITION, id="future_module", implemented=False,
+        candidate_source=None, data_layers=("flood_risk",), aliases=(),
+    )
+
+    monkeypatch.setitem(use_cases.USE_CASES, "future_module", placeholder)
+
+    deepseek(planner_reply("future_module"))
+
+    body = client.post("/analyze", json={"query": "something new"}).json()
 
     assert body["status"] == "not_yet_implemented"
     assert "top_prospects" not in body
     assert "score" not in body
-    assert "Historical imagery comparison" in body["missing_data"]
+    assert "Flood risk" in body["missing_data"]
 
 
 def test_analyze_area_too_large(client, deepseek, geocoder):

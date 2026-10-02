@@ -637,66 +637,88 @@ CONSTRUCTION_PROGRESS = UseCase(
 
     id="construction_progress",
 
-    title="Construction progress monitoring",
+    title="Land and construction change",
 
     description=(
-        "Detect how construction sites have changed between "
-        "two dates using current vs historical imagery."
+        "Find where land changed in an area between two dates: "
+        "construction or clearing, vegetation loss or gain, water "
+        "appearing or receding. Compares Sentinel-2 satellite "
+        "imagery (10 m). Default period: the last 12 months."
     ),
 
     example_queries=(
-        "Which of my construction sites have changed "
-        "significantly since last month?",
+        "What has changed around Thoraipakkam in the last year?",
+        "Where has new construction or land clearing appeared "
+        "along OMR since 2023?",
     ),
 
-    candidate_type="construction_site",
+    candidate_type="change_area",
 
-    candidate_noun="construction site",
+    candidate_noun="changed area",
 
-    candidate_source=None,
+    candidate_source="changes",
 
     data_layers=(
-        "site_registry",
         "satellite_imagery",
         "historical_imagery",
     ),
 
+    # Ranks changes by significance: how strong, how large, and how
+    # comparable the two scenes are.
     criteria=(
 
         Criterion(
             id="change_magnitude",
-            label="Estimated change magnitude",
-            weight=0.5,
+            label="Change strength",
+            weight=0.45,
             data_layer="historical_imagery",
-            missing_note="Change detection is not implemented.",
+            evaluator="change_magnitude",
         ),
 
         Criterion(
             id="changed_area",
             label="Changed area",
-            weight=0.3,
+            weight=0.35,
             data_layer="historical_imagery",
-            missing_note="Change detection is not implemented.",
+            evaluator="changed_area",
         ),
 
         Criterion(
             id="imagery_quality",
             label="Imagery quality (cloud cover, date gap)",
             weight=0.2,
-            data_layer="satellite_imagery",
-            missing_note="Change detection is not implemented.",
+            data_layer="historical_imagery",
+            evaluator="imagery_quality",
         ),
     ),
 
-    output_format="change_report",
-
-    limitations=(
-        "SkyLens cannot yet compare imagery between dates.",
-
-        "SkyLens has no registry of the customer's sites.",
+    unassessed=(
+        "cause_of_change",
+        "permits",
     ),
 
-    implemented=False,
+    # 5 pixels at 10 m.
+    default_min_area_m2=500,
+
+    output_format="change_report",
+
+    purpose="significance of change",
+
+    recommended_action=(
+        "Review the largest, strongest changes on recent "
+        "high-resolution imagery, then confirm the cause on the ground."
+    ),
+
+    limitations=(
+        "Sentinel-2 pixels are 10 m: changes smaller than about "
+        "500 m² are not detected.",
+
+        "Spectral change shows that a surface changed, not why: "
+        "construction, clearing, farming and flooding can look alike.",
+
+        "Only two dates are compared; changes that started and "
+        "reverted between them are missed.",
+    ),
 
     aliases=(
         "construction_monitoring",

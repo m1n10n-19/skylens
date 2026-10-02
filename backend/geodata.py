@@ -333,6 +333,10 @@ class Context:
     # layer id -> {"data_as_of", "retrieved_at"} (overpass.provenance)
     layer_provenance: dict = field(default_factory=dict)
 
+    # Analysis-specific facts for the report, e.g. which imagery
+    # dates a change detection compared.
+    meta: dict = field(default_factory=dict)
+
     def has_layer(self, layer_id):
 
         return self.layer_status.get(layer_id) == "loaded"

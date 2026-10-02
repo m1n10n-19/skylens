@@ -681,6 +681,117 @@ def location_proximity(candidate, context, spec):
 
 
 # ============================================================
+# CHANGE (patches from change_detection.py)
+# ============================================================
+
+def _day(iso):
+
+    return iso[:10] if iso else "unknown date"
+
+
+def change_magnitude(candidate, context, spec):
+    """
+    How strongly the spectral index changed across the patch: 30 at
+    the detection threshold, 100 at a full-scale change.
+    """
+
+    change = candidate.get("change")
+
+    if not change:
+        return None
+
+    delta = change["delta_mean"]
+
+    low, full = change["min_change"], change["full_scale"]
+
+    score = 30 + 70 * min(1, max(0, (abs(delta) - low) / (full - low)))
+
+    index = change["index"]
+
+    return {
+        "score": score,
+        "evidence": (
+            f"{index} {change['before_mean']:+.2f} -> {change['after_mean']:+.2f} "
+            f"({delta:+.2f}), mean over the patch"
+        ),
+        "reasons": (
+            [f"Strong {index} change ({delta:+.2f})"]
+            if score >= 70 else []
+        ),
+        "measurements": {
+            "index_before": change["before_mean"],
+            "index_after": change["after_mean"],
+            "index_delta": delta,
+        },
+    }
+
+
+def changed_area(candidate, context, spec):
+    """
+    Size of the changed patch: 500 m² scores 20, 10 ha or more 100.
+    """
+
+    change = candidate.get("change")
+
+    if not change:
+        return None
+
+    area = candidate["area_m2"]
+
+    score = min(100, 20 + 80 * math.log10(max(area, 500) / 500) / math.log10(200))
+
+    return {
+        "score": score,
+        "evidence": f"{_area(area)} ({change['pixels']} pixels at 10 m)",
+        "reasons": [f"{_area(area)} changed"] if area >= 5000 else [],
+        "measurements": {"changed_area_m2": area},
+    }
+
+
+def imagery_quality(candidate, context, spec):
+    """
+    How comparable the two scenes are: share of the area clear of
+    cloud in each, and how far apart they are in the year (seasonal
+    differences can look like change).
+    """
+
+    change = candidate.get("change")
+
+    if not change:
+        return None
+
+    before = change["before"]
+
+    after = change["after"]
+
+    gap = change["season_gap_days"]
+
+    clear = min(before["clear_fraction"], after["clear_fraction"])
+
+    score = max(0, 100 * clear - max(0, gap - 45) / 30 * 20)
+
+    return {
+        "score": score,
+        "evidence": (
+            f"Clear of cloud: {round(before['clear_fraction'] * 100)}% on {_day(before['date'])}, "
+            f"{round(after['clear_fraction'] * 100)}% on {_day(after['date'])}; "
+            f"{gap} days apart in the year"
+        ),
+        "reasons": (
+            [f"Scenes {gap} days apart in the year: seasonal change possible"]
+            if gap > 45 else []
+        ),
+        "measurements": {
+            "before_scene_date": before["date"],
+            "after_scene_date": after["date"],
+            "clear_fraction_before": before["clear_fraction"],
+            "clear_fraction_after": after["clear_fraction"],
+            "season_gap_days": gap,
+        },
+    }
+
+
+# ============================================================
 # REGISTRY
 # ============================================================
 
@@ -698,4 +809,7 @@ EVALUATORS = {
     "parking_potential": parking_potential,
     "vacancy_evidence": vacancy_evidence,
     "location_proximity": location_proximity,
+    "change_magnitude": change_magnitude,
+    "changed_area": changed_area,
+    "imagery_quality": imagery_quality,
 }

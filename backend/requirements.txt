@@ -7,3 +7,6 @@ geopy
 requests
 shapely
 pystac-client
+planetary-computer
+numpy
+rasterio
