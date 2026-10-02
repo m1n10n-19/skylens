@@ -269,6 +269,7 @@ EV_CHARGING = UseCase(
         "terrain",
         "land_cover",
         "protected_areas",
+        "land_in_use",
     ),
 
     criteria=(
@@ -359,7 +360,7 @@ EV_CHARGING = UseCase(
 
         Criterion(
             id="protected_status",
-            label="Protected areas and wetlands (OpenStreetMap)",
+            label="Protected or in-use land (OpenStreetMap)",
             # Evidence only; sites entirely inside a protected area are
             # excluded before ranking.
             weight=0.0,
@@ -453,6 +454,7 @@ COMMERCIAL_SITE_SELECTION = UseCase(
         "terrain",
         "land_cover",
         "protected_areas",
+        "land_in_use",
     ),
 
     criteria=(
@@ -514,6 +516,17 @@ COMMERCIAL_SITE_SELECTION = UseCase(
         ),
 
         Criterion(
+            id="vacancy",
+            label="Vacancy evidence",
+            # Evidence only here: shows land cover, tags and mapped
+            # building cover for open land without changing commercial
+            # scores. (Not measured for building candidates.)
+            weight=0.0,
+            data_layer="land_parcels",
+            evaluator="vacancy_evidence",
+        ),
+
+        Criterion(
             id="recent_change",
             label="Recent change on site (Sentinel-2)",
             # Evidence only: change is reported, not scored, because
@@ -535,7 +548,7 @@ COMMERCIAL_SITE_SELECTION = UseCase(
 
         Criterion(
             id="protected_status",
-            label="Protected areas and wetlands (OpenStreetMap)",
+            label="Protected or in-use land (OpenStreetMap)",
             # Evidence only; sites entirely inside a protected area are
             # excluded before ranking.
             weight=0.0,
@@ -620,6 +633,7 @@ LAND_ACQUISITION = UseCase(
         "terrain",
         "land_cover",
         "protected_areas",
+        "land_in_use",
     ),
 
     criteria=(
@@ -694,7 +708,7 @@ LAND_ACQUISITION = UseCase(
 
         Criterion(
             id="protected_status",
-            label="Protected areas and wetlands (OpenStreetMap)",
+            label="Protected or in-use land (OpenStreetMap)",
             # Evidence only; sites entirely inside a protected area are
             # excluded before ranking.
             weight=0.0,

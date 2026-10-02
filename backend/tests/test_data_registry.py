@@ -78,6 +78,11 @@ NEW_LAYERS = {
         "source": "OpenStreetMap (Overpass)",
         "available": True,
     },
+    "land_in_use": {
+        "label": "Land already in use (campuses, schools, parks...)",
+        "source": "OpenStreetMap (Overpass)",
+        "available": True,
+    },
 }
 
 

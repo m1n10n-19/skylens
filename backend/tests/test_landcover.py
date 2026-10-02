@@ -236,8 +236,9 @@ def test_no_mapped_protection_is_not_called_unprotected():
 
     result = protected_status({"_shape": box(0, 0, 60, 60)}, _context_with([]), None)
 
-    assert "does not prove the land is unprotected" in result["evidence"]
-    assert result["measurements"] == {"protected_overlap_share": 0.0, "wetland_overlap_share": 0.0}
+    assert "does not prove the land is available or unprotected" in result["evidence"]
+    assert result["measurements"] == {"protected_overlap_share": 0.0, "wetland_overlap_share": 0.0,
+                                      "in_use_overlap_share": 0.0}
 
 
 def test_sites_inside_protected_areas_are_not_ranked_wetlands_are_kept():
@@ -249,13 +250,15 @@ def test_sites_inside_protected_areas_are_not_ranked_wetlands_are_kept():
     inside = {"_shape": box(0, 0, 50, 50)}
     outside = {"_shape": box(2000, 2000, 2050, 2050)}
 
-    kept, dropped = pipeline._drop_protected([inside, outside], context)
+    kept, dropped = pipeline._drop_unavailable([inside, outside], context)
 
-    assert kept == [outside] and dropped == [inside]
+    assert kept == [outside] and dropped["protected"] == [inside]
 
     wet = _context_with([ProtectedArea(box(-1000, -1000, 1000, 1000), None, "wetland")])
 
-    assert pipeline._drop_protected([inside], wet) == ([inside], [])
+    kept, dropped = pipeline._drop_unavailable([inside], wet)
+
+    assert kept == [inside] and not any(dropped.values())
 
 
 # ============================================================
@@ -408,3 +411,132 @@ def test_imagery_found_land_is_capped_at_medium_confidence(monkeypatch):
     assert found["confidence_note"] == "Capped: found in imagery, not on the map."
     assert mapped["confidence"] == "high"
     assert "confidence_note" not in mapped
+
+
+# ============================================================
+# BUILDINGS AND LAND IN USE
+# ============================================================
+
+from geodata import LandInUse, building_cover
+
+
+def _built_context(buildings=(), in_use=()):
+
+    context = new_context(LAT, LON, 1)
+
+    context.buildings = list(buildings)
+
+    context.in_use = list(in_use)
+
+    context.layer_status["building_footprints"] = "loaded"
+
+    return context
+
+
+def test_building_cover_counts_overlaps_once():
+
+    context = _built_context([box(0, 0, 10, 10), box(5, 0, 15, 10)])
+
+    assert building_cover(context, box(0, 0, 20, 10)) == pytest.approx(0.75)
+
+
+def test_buildings_on_open_land_lower_vacancy_and_warn():
+
+    context = _built_context([box(0, 0, 20, 20)])
+
+    site = {"landuse": "vacant", "_shape": box(0, 0, 40, 40), "site_kind": "open_land"}
+
+    result = vacancy_evidence(site, context, AnalysisSpec(query="q", intent_type="x"))
+
+    assert result["measurements"]["building_cover_share"] == 0.25
+    assert result["score"] == 30
+    assert any("mapped buildings cover 25% of the site" in r for r in result["reasons"])
+
+
+def test_built_and_in_use_sites_are_not_ranked():
+
+    context = _built_context(
+        buildings=[box(0, 0, 40, 10)],
+        in_use=[LandInUse(box(100, 100, 300, 300), "IIT Madras", "university")],
+    )
+
+    built = {"_shape": box(0, 0, 40, 40), "site_kind": "open_land"}           # 25% built
+    campus = {"_shape": box(150, 150, 200, 200), "site_kind": "open_land"}    # inside campus
+    shop = {"_shape": box(0, 0, 40, 40), "site_kind": "building"}             # a building candidate
+    clear = {"_shape": box(500, 500, 540, 540), "site_kind": "open_land"}
+
+    kept, dropped = pipeline._drop_unavailable([built, campus, shop, clear], context)
+
+    assert kept == [shop, clear]
+    assert dropped["built"] == [built]
+    assert dropped["in_use"] == [campus]
+
+
+def test_campus_overlap_is_named():
+
+    context = _built_context(in_use=[LandInUse(box(-100, -100, 20, 100), "Anna University", "university")])
+
+    result = protected_status({"_shape": box(0, 0, 40, 40)}, context, None)
+
+    assert result["measurements"]["in_use_overlap_share"] == 0.5
+    assert "Warning: overlaps Anna University (university) on 50% of the site" in result["reasons"]
+
+
+def test_discovery_skips_buildings_and_in_use_land():
+
+    context = _built_context()
+
+    # Cover the whole grassland half with a mapped campus.
+    lat0, lon0 = offset(-300, -300)
+    lat1, lon1 = offset(0, 300)
+    campus = geodata._polygon([{"lat": lat0, "lon": lon0}, {"lat": lat0, "lon": lon1},
+                               {"lat": lat1, "lon": lon1}, {"lat": lat1, "lon": lon0}], context.proj)
+    context.in_use = [LandInUse(campus, "A College", "college")]
+
+    found, _ = _discover(context)
+
+    assert found == []
+
+
+@pytest.mark.parametrize("query,vacant,expected", [
+    ("10 cents of empty land in velachery for food court", None, True),
+    ("vacant plot near OMR for a shop", None, True),
+    ("space for a food court in Adyar", None, False),
+    ("food court site in Adyar", True, True),
+    ("food court in Adyar", None, False),
+])
+def test_wants_land(query, vacant, expected):
+
+    spec = AnalysisSpec(query=query, intent_type="commercial_site_selection",
+                        requirements={"vacant": vacant} if vacant is not None else {})
+
+    assert pipeline.wants_land(spec) is expected
+
+
+def test_land_question_leaves_out_existing_buildings(client, deepseek, overpass, imagery, dem,
+                                                     flood_evidence, open_land):
+
+    from tests.conftest import clear_year
+
+    imagery(clear_year())
+    dem()
+    flood_evidence()
+    open_land()
+
+    shop = {"type": "way", "id": 7001, "tags": {"building": "retail"},
+            "geometry": square(-200, -200, 30)}
+
+    deepseek(planner_reply("commercial_site_selection"))
+
+    fake = overpass(land_elements() + [shop])
+
+    body = client.post("/analyze", json={"query": "10 cents of empty land in velachery for food court"}).json()
+
+    assert all(p.get("site_kind") != "building" for p in body["top_prospects"])
+    assert 'way["building"~' not in fake.queries[0].split("->.cands")[0]
+    assert "The question asked for land, so existing buildings were not considered." in body["limitations"]
+
+    # Without asking for land, the building is a candidate.
+    body = client.post("/analyze", json={"query": "space for a food court in Adyar"}).json()
+
+    assert any(p.get("osm_id") == 7001 for p in body["top_prospects"])

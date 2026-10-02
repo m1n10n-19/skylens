@@ -514,6 +514,17 @@ _LAYERS = (
     ),
 
     DataLayer(
+        id="land_in_use",
+        label="Land already in use (campuses, schools, parks...)",
+        source="osm_overpass",
+        capabilities=("land_in_use",),
+        limitations=(
+            "Only what is mapped on OpenStreetMap; residential, commercial and industrial "
+            "zones are not treated as in use, since they include empty plots.",
+        ),
+    ),
+
+    DataLayer(
         id="protected_areas",
         label="Protected areas, reserved forests and wetlands",
         source="osm_overpass",

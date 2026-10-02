@@ -163,11 +163,12 @@ def _site_type(tags):
     return "unknown", "unknown"
 
 
-def candidate_selectors(source):
+def candidate_selectors(source, land_only=False):
     """
     Overpass selectors for a candidate source:
     "land_parcels" = open / vacant land polygons (NOT cadastral),
-    "sites" = open land plus existing commercial buildings.
+    "sites" = open land plus existing commercial buildings (open land
+    only when land_only: the question asked for land).
     """
 
     if source == "land_parcels":
@@ -185,9 +186,9 @@ def candidate_selectors(source):
             f'way["{key}"="{value}"]'
             for key, value in OPEN_LAND_TAGS
             if value != "farmland"
-        ] + [
+        ] + ([] if land_only else [
             f'way["building"~"^({types})$"]'
-        ]
+        ])
 
     raise ValueError(f"Unknown candidate source: {source}")
 
@@ -322,6 +323,19 @@ class ProtectedArea:
 
 
 @dataclass
+class LandInUse:
+    """
+    A mapped area already in use (campus, school, park...), metric.
+    """
+
+    shape: object
+
+    name: str | None
+
+    use: str
+
+
+@dataclass
 class Context:
     """
     Everything the criterion evaluators can measure against.
@@ -344,6 +358,11 @@ class Context:
     parking: list = field(default_factory=list)
 
     protected: list = field(default_factory=list)
+
+    in_use: list = field(default_factory=list)
+
+    # Mapped building footprints (metric polygons).
+    buildings: list = field(default_factory=list)
 
     # layer id -> "loaded" for every layer that was fetched
     layer_status: dict = field(default_factory=dict)
@@ -377,7 +396,40 @@ CONTEXT_LAYERS = (
     "ev_chargers",
     "parking",
     "protected_areas",
+    "building_footprints",
+    "land_in_use",
 )
+
+
+# Land already in use by an institution or as public open space: not
+# available for most projects. Residential, commercial and industrial
+# land-use areas are left out on purpose: in OpenStreetMap they usually
+# cover whole neighbourhoods, empty plots included.
+IN_USE_AMENITIES = ("university", "college", "school", "kindergarten", "hospital",
+                    "place_of_worship", "grave_yard")
+
+IN_USE_LANDUSE = ("education", "institutional", "religious", "cemetery", "military",
+                  "recreation_ground")
+
+IN_USE_LEISURE = ("park", "garden", "pitch", "sports_centre", "stadium", "golf_course",
+                  "playground")
+
+
+def in_use_kind(tags):
+    """
+    What a land-in-use area is used for (e.g. "university"), or None.
+    """
+
+    if tags.get("amenity") in IN_USE_AMENITIES:
+        return tags["amenity"]
+
+    if tags.get("landuse") in IN_USE_LANDUSE:
+        return tags["landuse"]
+
+    if tags.get("leisure") in IN_USE_LEISURE:
+        return tags["leisure"]
+
+    return None
 
 
 def new_context(latitude, longitude, radius_km, location_name=None):
@@ -468,6 +520,22 @@ def _context_statements(layers, area):
             "(\n  " + "\n  ".join(points) + "\n);\nout tags center;"
         )
 
+    if "building_footprints" in layers:
+
+        statements.append(
+            "(\n  " + "\n  ".join(each('way["building"]', 0)) + "\n);\nout tags geom;"
+        )
+
+    if "land_in_use" in layers:
+
+        in_use = (
+            each(f'wr["amenity"~"^({"|".join(IN_USE_AMENITIES)})$"]', 0)
+            + each(f'wr["landuse"~"^({"|".join(IN_USE_LANDUSE)})$"]', 0)
+            + each(f'wr["leisure"~"^({"|".join(IN_USE_LEISURE)})$"]', 0)
+        )
+
+        statements.append("(\n  " + "\n  ".join(in_use) + "\n);\nout tags geom;")
+
     if "protected_areas" in layers:
 
         protected = (
@@ -538,7 +606,7 @@ def _protected_shape(element, proj):
 
 
 def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
-                                   layers=(), location_name=None):
+                                   layers=(), location_name=None, land_only=False):
     """
     ONE Overpass request returning the candidate polygons inside the
     search area (search_area.SearchArea) and the context layers
@@ -555,7 +623,7 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
 
     selectors = "\n  ".join(
         f"{selector}{area_filter};"
-        for selector in candidate_selectors(source)
+        for selector in candidate_selectors(source, land_only)
         for area_filter in area.overpass_filters
     )
 
@@ -577,6 +645,10 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
     points = {}
 
     protected = {}
+
+    in_use = {}
+
+    buildings = {}
 
     for element in data.get("elements", []):
 
@@ -601,6 +673,33 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
                     )
 
             continue
+
+        use = in_use_kind(tags) if "land_in_use" in layers else None
+
+        if use:
+
+            if key not in in_use:
+
+                shape = _protected_shape(element, proj)
+
+                if shape is not None:
+                    in_use[key] = LandInUse(shape, tags.get("name"), use)
+
+            continue
+
+        if geometry and tags.get("building") and "building_footprints" in layers:
+
+            if key not in buildings:
+
+                shape = _polygon(geometry, proj)
+
+                if shape is not None:
+                    buildings[key] = shape
+
+            # Only commercial buildings in a "sites" analysis are candidates.
+            if not (source == "sites" and not land_only
+                    and tags["building"] in COMMERCIAL_BUILDING_TYPES):
+                continue
 
         # Roads and candidates come with full geometry; POIs,
         # parking and chargers come as points (node or centre).
@@ -645,6 +744,10 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
 
     context.protected = list(protected.values())
 
+    context.in_use = list(in_use.values())
+
+    context.buildings = list(buildings.values())
+
     for poi in points.values():
 
         amenity = poi.value("amenity")
@@ -680,6 +783,29 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
 # ============================================================
 # MEASUREMENT HELPERS
 # ============================================================
+
+def building_cover(context, shape):
+    """
+    Share of a shape covered by mapped building footprints (0-1).
+    """
+
+    from shapely import STRtree
+
+    if not context.buildings or shape.area == 0:
+        return 0.0
+
+    tree = context.meta.get("_building_index")
+
+    if tree is None:
+        tree = context.meta["_building_index"] = STRtree(context.buildings)
+
+    hits = [context.buildings[i] for i in tree.query(shape)]
+
+    if not hits:
+        return 0.0
+
+    return min(1.0, unary_union([shape.intersection(b) for b in hits]).area / shape.area)
+
 
 def nearest_road(context, shape, max_distance_m, major_only=False):
     """

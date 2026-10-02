@@ -46,7 +46,8 @@ def land(overpass):
 
     candidates, context = collect_candidates_and_context(
         "land_parcels", area, 150, None,
-        ["roads", "points_of_interest", "ev_chargers", "parking"], "Adyar",
+        ["roads", "points_of_interest", "ev_chargers", "parking", "building_footprints",
+         "land_in_use", "protected_areas"], "Adyar",
     )
 
     return {c["osm_id"]: c for c in candidates}, context
@@ -210,9 +211,17 @@ def test_land_use_tag_is_observed_not_measured(land):
 
     items = _ev_scored(land, 2001)["criteria"]["vacancy"]["evidence_items"]
 
-    assert [i["status"] for i in items] == ["observed"]
-    assert items[0]["measurement"]["value"] == "vacant"
-    assert "not verified" in items[0]["method"]
+    tag = items[0]
+
+    assert tag["status"] == "observed"
+    assert tag["measurement"]["value"] == "vacant"
+    assert "not verified" in tag["method"]
+
+    # With building footprints loaded, the cover of the site is measured.
+    cover = items[1]
+
+    assert cover["claim"] == "Share of the site covered by mapped building footprints"
+    assert cover["status"] == "measured"
 
 
 def test_unavailable_layer_gives_one_not_measured_item(land):

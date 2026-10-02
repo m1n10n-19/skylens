@@ -276,6 +276,15 @@ MEASUREMENTS = {
         "Share of the site inside mapped protected areas or reserved forests", "fraction",
         "measured", _OSM_PROTECTED,
     ),
+    "in_use_overlap_share": (
+        "Share of the site inside land already in use (campus, school, park, place of worship...)",
+        "fraction", "measured", _OSM_PROTECTED,
+    ),
+    "building_cover_share": (
+        "Share of the site covered by mapped building footprints", "fraction", "measured",
+        "Overlap of the site with OpenStreetMap building footprints; buildings missing "
+        "from the map are not counted",
+    ),
     "wetland_overlap_share": (
         "Share of the site inside mapped wetlands", "fraction", "measured", _OSM_PROTECTED,
     ),

@@ -6,6 +6,8 @@ AnalysisSpec + UseCase
     -> deterministic scoring -> ranking -> decision -> report
 """
 
+import re
+
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
@@ -25,8 +27,14 @@ import flood
 
 import landcover
 
-# A candidate at least this much inside a protected area is not ranked.
+# Candidates are not ranked when at least this much of them is inside
+# a protected area, inside land already in use, or (open land only)
+# covered by mapped buildings.
 PROTECTED_DROP_SHARE = 0.95
+
+IN_USE_DROP_SHARE = 0.5
+
+BUILT_DROP_SHARE = 0.2
 
 from buildings import get_buildings_with_provenance
 
@@ -311,28 +319,68 @@ def _discover_open_land(area, context, osm_candidates, minimum, maximum):
     return found
 
 
-def _drop_protected(candidates, context):
+# Words in a question that ask for land rather than any site.
+_LAND_WORDS = re.compile(r"\b(land|plot|plots|vacant|empty site|empty sites|open site)\b", re.I)
+
+
+def wants_land(spec):
     """
-    (kept, dropped): candidates at least PROTECTED_DROP_SHARE inside a
-    mapped protected area or reserved forest are not ranked.
+    True when the question asked for land: the planner marked it
+    vacant, or the customer said land / plot / vacant.
     """
 
-    zones = [z for z in context.protected if z.kind != "wetland"]
+    return bool(
+        spec.requirements.get("vacant") is True
+        or _LAND_WORDS.search(spec.query or "")
+    )
 
-    if not zones:
-        return candidates, []
 
-    kept, dropped = [], []
+def _share_inside(shape, zones):
+
+    from shapely.ops import unary_union
+
+    hits = [z for z in zones if shape.intersects(z)]
+
+    if not hits:
+        return 0.0
+
+    if not shape.area:
+        return 1.0 if any(z.contains(shape) for z in hits) else 0.0
+
+    return unary_union([shape.intersection(z) for z in hits]).area / shape.area
+
+
+def _drop_unavailable(candidates, context):
+    """
+    (kept, dropped by reason). Not ranked: candidates at least
+    PROTECTED_DROP_SHARE inside a protected area or reserved forest,
+    IN_USE_DROP_SHARE inside land already in use, or open land at
+    least BUILT_DROP_SHARE covered by mapped buildings.
+    """
+
+    from geodata import building_cover
+
+    protected = [z.shape for z in context.protected if z.kind != "wetland"]
+
+    in_use = [p.shape for p in context.in_use]
+
+    kept = []
+
+    dropped = {"protected": [], "in_use": [], "built": []}
 
     for candidate in candidates:
 
         shape = context.shape_of(candidate)
 
-        inside = sum(shape.intersection(z.shape).area for z in zones if shape.intersects(z.shape))
-
-        share = inside / shape.area if shape.area else (1.0 if any(z.shape.contains(shape) for z in zones) else 0.0)
-
-        (dropped if share >= PROTECTED_DROP_SHARE else kept).append(candidate)
+        if protected and _share_inside(shape, protected) >= PROTECTED_DROP_SHARE:
+            dropped["protected"].append(candidate)
+        elif in_use and _share_inside(shape, in_use) >= IN_USE_DROP_SHARE:
+            dropped["in_use"].append(candidate)
+        elif (candidate.get("site_kind") == "open_land" and context.buildings
+              and building_cover(context, shape) >= BUILT_DROP_SHARE):
+            dropped["built"].append(candidate)
+        else:
+            kept.append(candidate)
 
     return kept, dropped
 
@@ -393,11 +441,19 @@ def _candidates(use_case, spec, area, minimum, maximum, place):
                 if c.evaluator and c.data_layer in CONTEXT_LAYERS
             }
 
-            print("Context layers requested:", sorted(layers))
+            if use_case.discover_open_land:
+                # Needed to tell open land from built or in-use land.
+                layers |= {"building_footprints", "land_in_use", "protected_areas"}
+
+            land_only = source == "sites" and wants_land(spec)
+
+            print("Context layers requested:", sorted(layers), "land only:", land_only)
 
             candidates, context = collect_candidates_and_context(
-                source, area, minimum, maximum, layers, place
+                source, area, minimum, maximum, layers, place, land_only=land_only,
             )
+
+            context.meta["land_only"] = land_only
 
             if use_case.discover_open_land:
                 candidates += _discover_open_land(area, context, candidates, minimum, maximum)
@@ -877,7 +933,7 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         ],
     })
 
-    candidates, protected_dropped = _drop_protected(candidates, context)
+    candidates, dropped = _drop_unavailable(candidates, context)
 
     step("candidates", "done", count=len(candidates))
 
@@ -984,12 +1040,29 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     limitations = [f"Searched {area.description}."] + list(use_case.limitations)
 
-    if protected_dropped:
+    if dropped["protected"]:
         names = sorted({z.name for z in context.protected if z.name and z.kind != "wetland"})
         limitations.append(
-            f"{len(protected_dropped)} candidate(s) lying inside mapped protected areas"
+            f"{len(dropped['protected'])} candidate(s) lying inside mapped protected areas"
             + (f" ({', '.join(names)})" if names else "")
             + " were not ranked."
+        )
+
+    if dropped["in_use"]:
+        limitations.append(
+            f"{len(dropped['in_use'])} candidate(s) mostly inside land already in use "
+            "(campuses, schools, parks, places of worship...) were not ranked."
+        )
+
+    if dropped["built"]:
+        limitations.append(
+            f"{len(dropped['built'])} open-land candidate(s) at least "
+            f"{round(BUILT_DROP_SHARE * 100)}% covered by mapped buildings were not ranked."
+        )
+
+    if context.meta.get("land_only"):
+        limitations.append(
+            "The question asked for land, so existing buildings were not considered."
         )
 
     found_in_imagery = sum(1 for c in candidates if c.get("discovered"))
@@ -1064,7 +1137,9 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
             "maximum_area_m2": maximum,
             "target_area_m2": spec.area.target_m2,
             "found_in_imagery": sum(1 for c in candidates if c.get("discovered")),
-            "excluded_as_protected": len(protected_dropped),
+            "excluded_as_protected": len(dropped["protected"]),
+            "excluded_as_in_use": len(dropped["in_use"]),
+            "excluded_as_built": len(dropped["built"]),
             "evidence_coverage": (
                 top[0]["evidence_coverage"] if top else 0.0
             ),

@@ -12,6 +12,8 @@ connected patches that
 - are at least MIN_WIDTH_PIXELS (20 m) wide: thinner strips are mostly
   road verges and edges, not plots,
 - leave out land already covered by OSM candidates,
+- leave out mapped buildings and land already in use (campuses,
+  schools, parks, places of worship...),
 - leave out land that was vegetated in 2021 but looks built-up in the
   latest clear Sentinel-2 image (built on, or cleared, since 2021).
 
@@ -235,7 +237,12 @@ def discover(area_geometry, context, existing, min_area_m2=0, max_area_m2=None,
         for road in context.roads
     ]
 
-    removed = burn(roads) | burn(list(existing))
+    # Not open land: mapped buildings (houses under trees, sheds),
+    # and land already in use (campuses, schools, parks...).
+    removed = (
+        burn(roads) | burn(list(existing))
+        | burn(list(context.buildings)) | burn([p.shape for p in context.in_use])
+    )
 
     problems = []
 

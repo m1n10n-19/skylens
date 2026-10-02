@@ -31,6 +31,7 @@ from flood import FLOODED_SHARE
 
 from geodata import (
     CHARGER_RADIUS_M,
+    building_cover,
     MAJOR_ROAD_RADIUS_M,
     PARKING_RADIUS_M,
     POI_RADIUS_M,
@@ -658,6 +659,35 @@ VACANCY_LANDCOVER = {
 }
 
 
+# Mapped buildings covering at least this share of open land make it
+# "not vacant" for scoring (sites at 20% or more are not ranked).
+BUILT_COVER_WARNING = 0.05
+
+BUILT_COVER_SCORE = 30
+
+
+def _with_buildings(result, candidate, context):
+    """
+    Add mapped building cover to a vacancy result for open land.
+    """
+
+    if context is None or not context.has_layer("building_footprints"):
+        return result
+
+    cover = building_cover(context, context.shape_of(candidate))
+
+    result["measurements"]["building_cover_share"] = round(cover, 3)
+
+    if cover >= BUILT_COVER_WARNING:
+        result["score"] = min(result["score"], BUILT_COVER_SCORE)
+        result["evidence"] += f"; mapped buildings cover {round(cover * 100)}% of it"
+        result["reasons"].append(
+            f"Warning: mapped buildings cover {round(cover * 100)}% of the site: it may not be vacant"
+        )
+
+    return result
+
+
 def vacancy_evidence(candidate, context, spec):
 
     landcover = candidate.get("landcover")
@@ -668,7 +698,7 @@ def vacancy_evidence(candidate, context, spec):
 
         found = candidate.get("discovered") or {}
 
-        return {
+        return _with_buildings({
             "score": score,
             "evidence": (
                 f"Land-cover map ({found.get('land_cover_year') or '2021'}): {landcover}; "
@@ -676,7 +706,7 @@ def vacancy_evidence(candidate, context, spec):
             ),
             "reasons": [reason, "Found in imagery, not on the map"],
             "measurements": {"landcover_class": landcover},
-        }
+        }, candidate, context)
 
     landuse = candidate.get("landuse")
 
@@ -685,12 +715,12 @@ def vacancy_evidence(candidate, context, spec):
 
     score, reason = VACANCY_SCORES[landuse]
 
-    return {
+    return _with_buildings({
         "score": score,
         "evidence": f"OSM land-use tag: {landuse} (not verified on imagery)",
         "reasons": [reason],
         "measurements": {"landuse_tag": landuse},
-    }
+    }, candidate, context)
 
 
 def location_proximity(candidate, context, spec):
@@ -986,31 +1016,45 @@ def protected_status(candidate, context, spec):
 
     wetland = [(z, s) for z, s in overlaps if z.kind == "wetland"]
 
+    in_use = []
+
+    for place in getattr(context, "in_use", []):
+        if shape.intersects(place.shape):
+            in_use.append((place, (shape.intersection(place.shape).area / area) if area else 1.0))
+
     def label(zone):
         name = zone.name or {"wetland": "a mapped wetland", "reserve_forest": "a reserved forest",
                              "protected_area": "a mapped protected area"}[zone.kind]
         return f"{name} ({zone.title})" if zone.title else name
 
+    def use_label(place):
+        use = place.use.replace("_", " ")
+        return f"{place.name} ({use})" if place.name else f"a mapped {use}"
+
+    named = [(label(z), s) for z, s in protected + wetland] + [(use_label(p), s) for p, s in in_use]
+
     reasons = [
-        f"Warning: overlaps {label(z)} on {round(s * 100)}% of the site"
-        for z, s in protected + wetland if s >= 0.01
+        f"Warning: overlaps {name} on {round(s * 100)}% of the site"
+        for name, s in named if s >= 0.01
     ]
 
-    if overlaps:
-        evidence = "Overlaps " + "; ".join(f"{label(z)} ({round(s * 100)}%)" for z, s in overlaps)
+    if named:
+        evidence = "Overlaps " + "; ".join(f"{name} ({round(s * 100)}%)" for name, s in named)
     else:
         evidence = (
-            "No protected area, reserved forest or wetland mapped on OpenStreetMap "
-            "overlaps the site (absence on the map does not prove the land is unprotected)"
+            "No protected area, reserved forest, wetland, campus, park or other land in use "
+            "mapped on OpenStreetMap overlaps the site (absence on the map does not prove "
+            "the land is available or unprotected)"
         )
 
     return {
-        "score": 0 if protected else 50 if wetland else 100,
+        "score": 0 if protected or in_use else 50 if wetland else 100,
         "evidence": evidence,
         "reasons": reasons,
         "measurements": {
             "protected_overlap_share": round(min(1.0, sum(s for _, s in protected)), 3),
             "wetland_overlap_share": round(min(1.0, sum(s for _, s in wetland)), 3),
+            "in_use_overlap_share": round(min(1.0, sum(s for _, s in in_use)), 3),
         },
     }
 
