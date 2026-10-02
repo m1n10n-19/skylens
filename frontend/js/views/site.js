@@ -88,6 +88,7 @@
       const title = SL.OPPORTUNITY[uc.id] || "Site";
       const place = SL.shortPlace(r.resolved_location.name);
       const recommended = rank <= 3 && c.score >= 60;
+      const noun = SL.rankNoun(uc.id);
 
       el.innerHTML = `
         <section class="page">
@@ -95,13 +96,13 @@
             <a class="back" href="#/results/${id}">${SL.icon("arrowLeft", 16)} Back to results</a>
             <div class="site-nav">
               ${rank > 1 ? `<a class="btn-icon" href="#/site/${id}/${rank - 1}" aria-label="Previous site">${SL.icon("arrowLeft", 16)}</a>` : ""}
-              <span class="muted sm">Site ${rank} of ${top.length}</span>
+              <span class="muted sm">${noun} ${rank} of ${top.length}</span>
               ${rank < top.length ? `<a class="btn-icon" href="#/site/${id}/${rank + 1}" aria-label="Next site">${SL.icon("arrowRight", 16)}</a>` : ""}
             </div>
           </div>
           <div class="site-title">
             <div>
-              <h1>Site #${rank} — ${SL.esc(title)}</h1>
+              <h1>${noun} #${rank} — ${SL.esc(title)}</h1>
               <p class="muted">${SL.icon("pin", 15)} ${SL.esc(c.name ? c.name + ", " : "")}${SL.esc(place)}
                 · ${(+c.latitude).toFixed(5)}, ${(+c.longitude).toFixed(5)}</p>
             </div>
@@ -121,12 +122,12 @@
                 <div id="tab-body"></div>
               </div>
               <div class="card why">
-                <h3>${recommended ? "Why this site is recommended" : `Why SkyLens ranked it #${rank}`}</h3>
+                <h3>${recommended && noun === "Site" ? "Why this site is recommended" : `Why SkyLens ranked it #${rank}`}</h3>
                 <ul>${(c.reasons || []).map(x => `<li>${SL.esc(x)}</li>`).join("") || "<li>No specific reasons recorded.</li>"}</ul>
               </div>
               ${SL.evidence.verifyHTML(c) ? `
               <div class="card verify-card">
-                <h3>What to verify before committing</h3>
+                <h3>${noun === "Change" ? "What to verify about this change" : "What to verify before committing"}</h3>
                 <p class="muted sm">Remote data can't settle these. Cheapest checks first; SkyLens doesn't carry them out.</p>
                 ${SL.evidence.verifyHTML(c)}
               </div>` : ""}

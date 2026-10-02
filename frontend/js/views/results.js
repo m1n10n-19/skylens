@@ -7,6 +7,7 @@
     ev_charging_site_selection: "EV charging locations",
     commercial_site_selection: "commercial sites",
     land_acquisition: "land parcels",
+    construction_progress: "changed areas",
   };
 
   // Queries that work today, offered when a question is not supported.
@@ -15,6 +16,7 @@
     ev_charging_site_selection: "Find 10 cent empty land in Thoraipakkam for an EV charger",
     commercial_site_selection: "Find 4800 sq ft sites around Adyar suitable for a food court",
     land_acquisition: "Find vacant land above 1 acre near OMR with good road access",
+    construction_progress: "What has changed around Thoraipakkam in the last year?",
   };
 
   function tooLarge(el, r) {
@@ -37,8 +39,29 @@
     SL.$("#edit", el).onclick = () => { SL.pendingQuery = r.query; SL.go("#/"); };
   }
 
+  // A change analysis with no clear imagery for the period.
+  function noImagery(el, r) {
+    el.innerHTML = `
+      <section class="page narrow">
+        <a class="back" href="#/">${SL.icon("arrowLeft", 16)} Ask another question</a>
+        <h1>No clear satellite imagery for that period</h1>
+        <p class="q-echo">"${SL.esc(r.query)}"</p>
+        <div class="card understood">
+          <div class="tags">
+            ${r.use_case ? `<span class="tag tag-lime">${SL.esc(r.use_case.title)}</span>` : ""}
+            ${r.search_area ? `<span class="tag">${SL.icon("pin", 13)} ${SL.esc(r.search_area.name)}</span>` : ""}
+          </div>
+          <p>${SL.esc(r.message)}</p>
+          <ul class="muted sm">${(r.suggestions || []).map(s => `<li>${SL.esc(s)}</li>`).join("")}</ul>
+          <div class="row-gap"><button class="btn-lime" id="edit">Edit question</button></div>
+        </div>
+      </section>`;
+    SL.$("#edit", el).onclick = () => { SL.pendingQuery = r.query; SL.go("#/"); };
+  }
+
   function understood(el, r) {
     if (r.status === "area_too_large") return tooLarge(el, r);
+    if (r.status === "data_unavailable") return noImagery(el, r);
     const spec = r.analysis_spec || {};
     const det = r.detected_requirements || {};
     const implemented = (r.supported_use_cases || []).filter(u => u.implemented);
@@ -102,6 +125,8 @@
       const t = top[0];
       const partial = r.completeness && r.completeness.status === "partial" ? r.completeness.reasons : null;
       const toVerify = t && SL.evidence.has(t) ? t.assessment.verify.length : 0;
+      const rankNoun = SL.rankNoun(uc.id);
+      const cd = r.change_detection;
 
       const subtitle = top.length
         ? `${top.length} ${WHAT[uc.id] || "sites"} ranked in ${SL.esc(place)}, from
@@ -116,6 +141,8 @@
               <h1>SkyLens Decision</h1>
               <p class="lead">${subtitle}</p>
               ${r.search_area.description ? `<p class="searched">${SL.icon("pin", 14)} Searched ${SL.esc(r.search_area.description)}</p>` : ""}
+              ${cd ? `<p class="searched">${SL.icon("satellite", 14)} Compared Sentinel-2 images from
+                ${SL.evidence.day(cd.before.date)} and ${SL.evidence.day(cd.after.date)}</p>` : ""}
               <p class="q-echo">"${SL.esc(r.query)}"</p>
               ${partial ? `
               <div class="partial" role="status">
@@ -141,7 +168,7 @@
           ${top.length ? `
           <div class="decision-grid">
             <article class="card top-card">
-              <div class="card-head"><span>Top opportunity</span>${SL.confidenceBadge(t.confidence)}</div>
+              <div class="card-head"><span>${cd ? "Most significant change" : "Top opportunity"}</span>${SL.confidenceBadge(t.confidence)}</div>
               <a href="#/site/${id}/1">${SL.maps.thumb(t, 480, 270)}</a>
               <div class="top-score">
                 <span class="rank-badge">#1</span>
@@ -178,7 +205,7 @@
             <div>
               <div class="muted sm">Recommended action</div>
               <p>${SL.esc(r.decision.recommended_action)}</p>
-              ${toVerify ? `<p class="sm">Before committing to site #1, check
+              ${toVerify ? `<p class="sm">Before acting on ${rankNoun.toLowerCase()} #1, check
                 <a class="link" href="#/site/${id}/1">${toVerify} thing${toVerify === 1 ? "" : "s"}</a>
                 that remote data can't settle.</p>` : ""}
               <p class="muted sm">Scores use measured evidence only

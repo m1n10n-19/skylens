@@ -17,6 +17,8 @@
       const verify = SL.evidence.mergedVerify(top.slice(0, 3));
       const dates = SL.evidence.dates(top);
       const done = r.completeness;
+      const noun = SL.rankNoun(uc.id);
+      const cd = r.change_detection;
 
       el.innerHTML = `
         <div class="report-bar no-print">
@@ -45,6 +47,10 @@
             <tr><th>Size filter</th><td>${SL.isNum(an.minimum_area_m2) ? "≥ " + SL.fmt(an.minimum_area_m2) + " m²" : "–"}
               ${SL.isNum(an.maximum_area_m2) ? " and ≤ " + SL.fmt(an.maximum_area_m2) + " m²" : ""}
               ${r.analysis_spec.area.as_stated ? ` (requested: ${SL.esc(r.analysis_spec.area.as_stated)})` : ""}</td></tr>
+            ${cd ? `<tr><th>Imagery compared</th><td class="rp-scene">Sentinel-2 ${SL.esc(cd.before.id)}
+              (${SL.evidence.day(cd.before.date)}, ${Math.round(cd.before.clear_fraction * 100)}% clear) and
+              ${SL.esc(cd.after.id)} (${SL.evidence.day(cd.after.date)}, ${Math.round(cd.after.clear_fraction * 100)}% clear);
+              ${cd.season_gap_days} days apart in the year. ${SL.esc(cd.method)}</td></tr>` : ""}
             <tr><th>Overall confidence</th><td>${SL.esc(SL.cap(r.decision.confidence))}</td></tr>
             ${done ? `<tr><th>Completeness</th><td>${done.status === "partial"
               ? `Partial: ${done.reasons.map(SL.esc).join(" ")}` : "Complete"}</td></tr>` : ""}
@@ -60,7 +66,7 @@
               <td>${Math.round(k.weight * 100)}%</td><td>${k.measured ? "Yes" : "No data"}</td></tr>`).join("")}</tbody>
           </table>
 
-          <h2>Ranked sites</h2>
+          <h2>Ranked ${noun.toLowerCase()}s</h2>
           ${top.length ? `<table class="rp-table">
             <thead><tr><th>#</th><th>Site</th><th>Area</th><th>Score</th><th>Confidence</th><th>Coordinates</th></tr></thead>
             <tbody>${top.map(c => `<tr><td>${c.rank}</td>
@@ -72,7 +78,7 @@
 
           ${top.slice(0, 3).map(c => `
             <section class="rp-site">
-              <h3>Site #${c.rank}: score ${SL.fmt(c.score)} / 100</h3>
+              <h3>${noun} #${c.rank}: score ${SL.fmt(c.score)} / 100</h3>
               <div class="rp-site-grid">
                 ${SL.maps.thumb(c, 360, 230)}
                 <div>

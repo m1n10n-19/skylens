@@ -123,12 +123,14 @@
     return isNaN(d) ? null : d.toLocaleDateString("en-IN", {day: "numeric", month: "short", year: "numeric"});
   };
 
-  // "OpenStreetMap (Overpass), data as of 30 Sep 2026" for one criterion.
+  // "OpenStreetMap (Overpass), data as of 30 Sep 2026" or
+  // "Microsoft Planetary Computer, imaged 26 Sep 2026" for one criterion.
   function sourceLine(crit) {
     const item = (crit.evidence_items || []).find(i => i.source);
     if (!item) return "";
+    const imaged = item.observed_at && day(item.observed_at);
     const asOf = item.data_as_of && day(item.data_as_of);
-    return SL.esc(item.source) + (asOf ? `, data as of ${asOf}` : "");
+    return SL.esc(item.source) + (imaged ? `, imaged ${imaged}` : asOf ? `, data as of ${asOf}` : "");
   }
 
   SL.evidence = {
@@ -225,6 +227,7 @@
     },
 
     typeLabel(candidate) {
+      if (candidate.change_type) return "Change";
       return candidate.site_type ? "Land use (inferred)" : "Building type";
     },
 
@@ -239,6 +242,8 @@
         ["Approx. area", SL.areaText(candidate.area_m2, spec)],
         [SL.facts.typeLabel(candidate), SL.facts.typeValue(candidate)],
       ];
+
+      if (candidate.interpretation) rows.push(["What it may mean", SL.esc(candidate.interpretation)]);
 
       Object.entries(candidate.criteria || {}).forEach(([id, crit]) => {
         if (SKIP.has(id)) return;

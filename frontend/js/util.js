@@ -150,7 +150,11 @@ window.SL = window.SL || {};
     ev_charging_site_selection: "EV charging opportunity",
     commercial_site_selection: "Commercial site opportunity",
     land_acquisition: "Land opportunity",
+    construction_progress: "Detected change",
   };
+
+  // What one ranked result is called: "Site #1" or "Change #1".
+  SL.rankNoun = useCaseId => useCaseId === "construction_progress" ? "Change" : "Site";
 
   // ---------------------------------------------------------- storage
 
