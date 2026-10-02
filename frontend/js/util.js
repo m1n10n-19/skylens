@@ -65,6 +65,9 @@ window.SL = window.SL || {};
     return `${base} (≈ ${SL.fmt(value, value < 10 ? 1 : 0)} ${unit[2]})`;
   };
 
+  // "Weight 15%", or "Evidence only, not scored" for weight 0.
+  SL.weightText = w => w > 0 ? `Weight ${Math.round(w * 100)}%` : "Evidence only, not scored";
+
   SL.confidenceBadge = c => {
     const level = String(c || "low").toLowerCase();
     return `<span class="badge badge-${SL.esc(level)}">${SL.esc(SL.cap(level))}</span>`;

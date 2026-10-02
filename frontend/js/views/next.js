@@ -96,13 +96,15 @@
                 ${row(SL.facts.typeLabel(sites[0]), sites.map(SL.facts.typeValue))}
                 ${row("Evidence coverage", sites.map(c => Math.round(c.evidence_coverage * 100) + "%"))}
                 ${crits.map(([cid, k]) => row(
-                  `${SL.esc(k.label)}<small>weight ${Math.round(k.weight * 100)}%</small>`,
+                  `${SL.esc(k.label)}<small>${SL.esc(SL.weightText(k.weight).toLowerCase())}</small>`,
                   sites.map(c => {
                     const x = c.criteria[cid];
-                    return x && x.available
-                      ? `<b>${SL.fmt(x.score)}</b><small>${SL.esc(x.evidence || "")}</small>` : "–";
+                    if (!x || !x.available) return "–";
+                    return x.weight === 0 ? `<small>${SL.esc(x.evidence || "")}</small>`
+                      : `<b>${SL.fmt(x.score)}</b><small>${SL.esc(x.evidence || "")}</small>`;
                   }),
-                  sites.map(c => c.criteria[cid] && c.criteria[cid].available ? c.criteria[cid].score : null),
+                  sites.map(c => c.criteria[cid] && c.criteria[cid].available && c.criteria[cid].weight > 0
+                    ? c.criteria[cid].score : null),
                 )).join("")}
               </tbody>
             </table>

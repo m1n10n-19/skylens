@@ -7,15 +7,19 @@
     const crits = Object.values(c.criteria || {});
     return `
       <div class="breakdown">
-        ${crits.map(k => k.available ? `
+        ${crits.map(k => k.available && k.weight === 0 ? `
+          <div class="bd">
+            <div class="bd-top"><span>${SL.esc(k.label)}</span><em>Evidence only</em></div>
+            <div class="bd-meta">${SL.esc(k.evidence || "")}</div>
+          </div>` : k.available ? `
           <div class="bd">
             <div class="bd-top"><span>${SL.esc(k.label)}</span><b>${SL.fmt(k.score)}</b></div>
             <div class="bar"><i style="width:${Math.max(2, k.score)}%"></i></div>
-            <div class="bd-meta">Weight ${Math.round(k.weight * 100)}% · ${SL.esc(k.evidence || "")}</div>
+            <div class="bd-meta">${SL.weightText(k.weight)} · ${SL.esc(k.evidence || "")}</div>
           </div>` : `
           <div class="bd bd-na">
             <div class="bd-top"><span>${SL.esc(k.label)}</span><em>Not measured</em></div>
-            <div class="bd-meta">Weight ${Math.round(k.weight * 100)}% · ${SL.esc(k.note || "No data")}</div>
+            <div class="bd-meta">${SL.weightText(k.weight)} · ${SL.esc(k.note || "No data")}</div>
           </div>`).join("")}
         <p class="muted sm">Score = weighted average of the measured criteria
           (${Math.round((c.evidence_coverage || 0) * 100)}% of the weight). Criteria without data are
@@ -89,6 +93,10 @@
       const place = SL.shortPlace(r.resolved_location.name);
       const recommended = rank <= 3 && c.score >= 60;
       const noun = SL.rankNoun(uc.id);
+      // Reasons starting "Warning:" are cautions, shown apart from the reasons to pick a site.
+      const isWarning = x => /^Warning:\s*/.test(x);
+      const warnings = (c.reasons || []).filter(isWarning).map(x => SL.cap(x.replace(/^Warning:\s*/, "")));
+      const reasons = (c.reasons || []).filter(x => !isWarning(x));
 
       el.innerHTML = `
         <section class="page">
@@ -121,9 +129,14 @@
                 </div>
                 <div id="tab-body"></div>
               </div>
+              ${warnings.length ? `
+              <div class="partial" role="note">
+                <b>Warning.</b> ${warnings.length === 1 ? SL.esc(warnings[0]) + "." : ""}
+                ${warnings.length > 1 ? `<ul>${warnings.map(x => `<li>${SL.esc(x)}</li>`).join("")}</ul>` : ""}
+              </div>` : ""}
               <div class="card why">
                 <h3>${recommended && noun === "Site" ? "Why this site is recommended" : `Why SkyLens ranked it #${rank}`}</h3>
-                <ul>${(c.reasons || []).map(x => `<li>${SL.esc(x)}</li>`).join("") || "<li>No specific reasons recorded.</li>"}</ul>
+                <ul>${reasons.map(x => `<li>${SL.esc(x)}</li>`).join("") || "<li>No specific reasons recorded.</li>"}</ul>
               </div>
               ${SL.evidence.verifyHTML(c) ? `
               <div class="card verify-card">

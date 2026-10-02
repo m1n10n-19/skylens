@@ -63,7 +63,7 @@
           <table class="rp-table">
             <thead><tr><th>Criterion</th><th>Weight</th><th>Measured</th></tr></thead>
             <tbody>${(uc.criteria || []).map(k => `<tr><td>${SL.esc(k.label)}</td>
-              <td>${Math.round(k.weight * 100)}%</td><td>${k.measured ? "Yes" : "No data"}</td></tr>`).join("")}</tbody>
+              <td>${k.weight > 0 ? Math.round(k.weight * 100) + "%" : "Evidence only"}</td><td>${k.measured ? "Yes" : "No data"}</td></tr>`).join("")}</tbody>
           </table>
 
           <h2>Ranked ${noun.toLowerCase()}s</h2>
