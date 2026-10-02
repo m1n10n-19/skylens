@@ -4,7 +4,7 @@ from criteria import (
     solar_footprint_size,
 )
 
-from use_cases import DATA_LAYERS, data_layer_available
+import data_registry
 
 
 # =============================================
@@ -78,12 +78,10 @@ def _missing_note(criterion):
     if criterion.evaluator is None:
         return criterion.missing_note or "Not measured yet."
 
-    layer = DATA_LAYERS.get(criterion.data_layer, {})
-
-    if not data_layer_available(criterion.data_layer):
+    if not data_registry.is_available(criterion.data_layer):
         return (
             criterion.missing_note
-            or f"No {layer.get('label', criterion.data_layer).lower()} "
+            or f"No {data_registry.layer_label(criterion.data_layer).lower()} "
                f"data connected."
         )
 

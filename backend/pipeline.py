@@ -8,6 +8,8 @@ AnalysisSpec + UseCase
 
 from fastapi import HTTPException
 
+import data_registry
+
 from buildings import get_buildings
 
 from geodata import (
@@ -25,7 +27,6 @@ import search_area
 from scoring import score_candidate
 
 from use_cases import (
-    DATA_LAYERS,
     USE_CASES,
     data_layer_available,
     describe_use_case,
@@ -93,7 +94,7 @@ def unsupported_response(query, intent, spec):
 def not_implemented_response(query, intent, spec, use_case):
 
     missing_layers = [
-        DATA_LAYERS[layer]["label"]
+        data_registry.layer_label(layer)
         for layer in use_case.data_layers
         if not data_layer_available(layer)
     ]
@@ -285,8 +286,6 @@ def _evidence(use_case, context, satellite_status):
 
     for layer in use_case.data_layers:
 
-        info = DATA_LAYERS.get(layer, {"label": layer})
-
         if layer == "satellite_imagery":
             status = satellite_status
         elif not data_layer_available(layer):
@@ -305,8 +304,8 @@ def _evidence(use_case, context, satellite_status):
 
         entry = {
             "id": layer,
-            "label": info.get("label", layer),
-            "source": info.get("source"),
+            "label": data_registry.layer_label(layer),
+            "source": data_registry.source_label(layer),
             "status": state,
         }
 
