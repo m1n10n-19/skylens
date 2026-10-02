@@ -90,6 +90,30 @@ def _missing_note(criterion):
     return "Could not be measured for this candidate."
 
 
+def _missing_state(criterion, context):
+    """
+    Why a criterion has no evidence:
+
+        not_implemented   SkyLens has no evaluator for it yet
+        data_unavailable  no provider for its data layer
+        data_not_loaded   the layer has a provider but was not
+                          fetched for this analysis
+        not_measurable    the evaluator could not measure it for
+                          this candidate
+    """
+
+    if criterion.evaluator is None:
+        return "not_implemented"
+
+    if not data_registry.is_available(criterion.data_layer):
+        return "data_unavailable"
+
+    if not context.has_layer(criterion.data_layer):
+        return "data_not_loaded"
+
+    return "not_measurable"
+
+
 def score_weighted_criteria(candidate, spec, use_case, context):
     """
     score = sum(weight * criterion score) / sum(weight)
@@ -134,6 +158,7 @@ def score_weighted_criteria(candidate, spec, use_case, context):
                 "label": criterion.label,
                 "weight": criterion.weight,
                 "available": False,
+                "state": _missing_state(criterion, context),
                 "score": None,
                 "note": note,
                 "evidence_items": evidence.dump([
@@ -153,6 +178,7 @@ def score_weighted_criteria(candidate, spec, use_case, context):
             "label": criterion.label,
             "weight": criterion.weight,
             "available": True,
+            "state": "measured",
             "score": round(score, 1),
             "evidence": result.get("evidence"),
             "evidence_items": evidence.dump(
