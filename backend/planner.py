@@ -60,6 +60,13 @@ Return ONLY a JSON object with these fields:
     "business_type": "<e.g. food court, pharmacy, or null>",
     "...": "<any other requirement the customer stated>"
   }},
+  "time_range": {{
+    "start": "<YYYY, YYYY-MM or YYYY-MM-DD the customer stated, or null>",
+    "end": "<YYYY, YYYY-MM or YYYY-MM-DD the customer stated, or null>",
+    "years_back": <number for "last N years", else null>,
+    "months_back": <number for "last N months", else null>,
+    "as_stated": "<the period exactly as the customer said it, or null>"
+  }},
   "data_needed": ["<data layers the analysis would need>"],
   "criteria": ["<what should be measured to rank candidates>"],
   "constraints": ["<hard constraints from the request>"],
@@ -81,6 +88,11 @@ Rules:
   unit "acre". "at least 500 square metres" -> min 500, unit "sqm".
   "4800 sq ft" -> target 4800, unit "sqft". If no size is stated,
   use null for all area values.
+- Copy time periods as stated. "since 2019" -> start "2019".
+  "between June 2020 and 2023" -> start "2020-06", end "2023".
+  "in the last 5 years" -> years_back 5. "since last month" ->
+  months_back 1. If no period is stated, use null for all
+  time_range values. Do not invent dates.
 - Do not invent coordinates, measurements, distances, prices,
   owners or any other factual data about places.
 - Use null when uncertain.

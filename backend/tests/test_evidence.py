@@ -46,7 +46,8 @@ def land(overpass):
 
     candidates, context = collect_candidates_and_context(
         "land_parcels", area, 150, None,
-        ["roads", "points_of_interest", "ev_chargers", "parking"], "Adyar",
+        ["roads", "points_of_interest", "ev_chargers", "parking", "building_footprints",
+         "land_in_use", "protected_areas"], "Adyar",
     )
 
     return {c["osm_id"]: c for c in candidates}, context
@@ -70,9 +71,42 @@ def test_every_evaluator_measurement_is_catalogued(land):
         AnalysisSpec(query="q", intent_type="x", area=AreaRequirement(min_m2=1000)),
     ]
 
+    scene = {"date": "2026-01-10", "clear_fraction": 0.9}
+
     candidates = list(by_id.values()) + [
         {"latitude": LAT, "longitude": LON, "area_m2": 2500, "building_type": "commercial"},
+        {"latitude": LAT, "longitude": LON, "area_m2": 1200, "change": {
+            "index": "NDVI", "before_mean": 0.7, "after_mean": 0.3, "delta_mean": -0.4,
+            "min_change": 0.25, "full_scale": 0.8, "pixels": 12, "before": scene, "after": scene,
+            "season_gap_days": 10,
+        }},
     ]
+
+    candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900, "recent_change": {
+        "measurable": True, "pixels": 9, "clear_pixels": 9, "changed_share": 0.4,
+        "shares": {"water_gain": 0.0, "water_loss": 0.0, "built_or_bare_increase": 0.3,
+                   "vegetation_loss": 0.1, "vegetation_gain": 0.0},
+    }})
+
+    context.meta["recent_change"] = {"before": scene, "after": scene}
+
+    candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900, "terrain": {
+        "measurable": True, "elevation_m": 4.0, "surroundings_m": 6.5,
+        "relative_elevation_m": -2.5, "slope_pct": 1.2,
+    }})
+
+    context.meta["terrain"] = {"ring_m": 500}
+
+    context.meta["infrastructure_features"] = []
+
+    candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900, "landcover": "grassland",
+                       "discovered": {"land_cover_year": "2021", "note": "test"}})
+
+    from tests.conftest import flood_result
+
+    candidates.append({"latitude": LAT, "longitude": LON, "area_m2": 900,
+                       "flood": flood_result(flooded_seasons=2, history_share=0.3),
+                       "terrain": {"measurable": True, "elevation_m": 4.0, "surroundings_m": 6.5, "relative_elevation_m": -2.5, "slope_pct": 1.2}})
 
     seen = set()
 
@@ -179,20 +213,33 @@ def test_land_use_tag_is_observed_not_measured(land):
 
     items = _ev_scored(land, 2001)["criteria"]["vacancy"]["evidence_items"]
 
-    assert [i["status"] for i in items] == ["observed"]
-    assert items[0]["measurement"]["value"] == "vacant"
-    assert "not verified" in items[0]["method"]
+    tag = items[0]
+
+    assert tag["status"] == "observed"
+    assert tag["measurement"]["value"] == "vacant"
+    assert "not verified" in tag["method"]
+
+    # With building footprints loaded, the cover of the site is measured.
+    cover = items[1]
+
+    assert cover["claim"] == "Share of the site covered by mapped building footprints"
+    assert cover["status"] == "measured"
 
 
 def test_unavailable_layer_gives_one_not_measured_item(land):
 
-    entry = _ev_scored(land, 2001)["criteria"]["flood_risk"]
+    by_id, context = land
+
+    entry = score_weighted_criteria(
+        by_id[2001], AnalysisSpec(query="q", intent_type="land_acquisition"),
+        USE_CASES["land_acquisition"], context,
+    )["criteria"]["land_use_compatibility"]
 
     assert entry["evidence_items"] == [{
-        "claim": "Flood risk",
+        "claim": "Land-use compatibility (zoning)",
         "status": "not_measured",
         "measurement": None,
-        "layer": "flood_risk",
+        "layer": "zoning",
         "source": None,
         "source_id": None,
         "observed_at": None,

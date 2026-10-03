@@ -43,6 +43,7 @@ def test_use_cases_lists_registry(client):
         "commercial_site_selection",
         "land_acquisition",
         "construction_progress",
+        "infrastructure_outlook",
     ]
 
 
@@ -171,19 +172,30 @@ def test_analyze_unsupported_use_case(client, deepseek):
 
     assert body["status"] == "unsupported_use_case"
     assert body["detected_requirements"]["intent_type"] == "railway_inspection"
-    assert len(body["supported_use_cases"]) == 5
+    assert len(body["supported_use_cases"]) == 6
 
 
-def test_analyze_not_yet_implemented_produces_no_result(client, deepseek):
+def test_analyze_not_yet_implemented_produces_no_result(client, deepseek, monkeypatch):
 
-    deepseek(planner_reply("construction_progress"))
+    import dataclasses
+    import use_cases
 
-    body = client.post("/analyze", json={"query": "what changed?"}).json()
+    # Every registered module is implemented now; register a placeholder.
+    placeholder = dataclasses.replace(
+        use_cases.LAND_ACQUISITION, id="future_module", implemented=False,
+        candidate_source=None, data_layers=("zoning",), aliases=(),
+    )
+
+    monkeypatch.setitem(use_cases.USE_CASES, "future_module", placeholder)
+
+    deepseek(planner_reply("future_module"))
+
+    body = client.post("/analyze", json={"query": "something new"}).json()
 
     assert body["status"] == "not_yet_implemented"
     assert "top_prospects" not in body
     assert "score" not in body
-    assert "Historical imagery comparison" in body["missing_data"]
+    assert "Zoning / permitted land use" in body["missing_data"]
 
 
 def test_analyze_area_too_large(client, deepseek, geocoder):
@@ -273,6 +285,10 @@ def test_analyze_solar_success_shape(client, deepseek, overpass):
 
 
 def test_analyze_ev_measures_available_layers_only(client, deepseek, overpass):
+    """
+    Without imagery, terrain or flood data (all blocked in tests), the
+    criteria that need them are left out, not scored as zero.
+    """
 
     deepseek(planner_reply(
         "ev_charging_site_selection",
@@ -293,14 +309,16 @@ def test_analyze_ev_measures_available_layers_only(client, deepseek, overpass):
     flood = best["criteria"]["flood_risk"]
 
     assert flood["available"] is False
+    assert flood["state"] == "data_not_loaded"
     assert flood["score"] is None
     assert "flood_risk" in best["missing_data"]
     assert best["evidence_coverage"] < 1
 
     layers = {e["id"]: e["status"] for e in body["evidence"]}
 
-    assert layers["flood_risk"] == "unavailable"
+    assert layers["flood_risk"] == "not_loaded"
     assert layers["roads"] == "used"
+    assert body["completeness"]["status"] == "partial"
 
 
 def test_analyze_ranking_is_deterministic(client, deepseek, overpass):
@@ -325,7 +343,7 @@ def test_analyze_no_candidates_is_honest(client, deepseek, overpass):
     assert body["top_prospects"] == []
     assert body["confidence"] == "low"
     assert "does not prove none exists" in body["decision"]["summary"]
-    assert "flood_risk" in body["missing_data"]
+    assert "land_use_compatibility" in body["missing_data"]
 
 
 def test_satellite_failure_degrades_gracefully(client, deepseek, overpass, monkeypatch):

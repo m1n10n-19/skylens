@@ -15,7 +15,7 @@
     rate_limit: "intent",
     deepseek: "intent", deepseek_json: "intent", location_extraction: "intent",
     geocoding: "location",
-    building_data: "candidates", candidate_data: "candidates",
+    building_data: "candidates", candidate_data: "candidates", imagery_data: "candidates",
     scoring: "scoring",
   };
 
@@ -34,6 +34,8 @@
       case "building_data":
       case "candidate_data":
         return "The map data provider (OpenStreetMap Overpass) is busy or rate-limiting. Wait about a minute and try again.";
+      case "imagery_data":
+        return "The satellite imagery provider (Microsoft Planetary Computer) didn't respond. Try again in a minute.";
       case "scoring":
         return "SkyLens could not rank the candidates.";
       case "timeout":
@@ -60,9 +62,14 @@
         return done
           ? d.layers.filter(l => l.available).map(l => SL.layerLabel(l.id)).join(" · ")
           : "Choosing the data to use";
-      case "candidates":
-        return done ? `${SL.fmt(d.count)} candidate${d.count === 1 ? "" : "s"} found`
-          : "Scanning satellite imagery and map data";
+      case "candidates": {
+        const changes = (run.steps.intent || {}).use_case === "construction_progress";
+        if ((run.steps.intent || {}).use_case === "infrastructure_outlook") {
+          return done ? `${SL.fmt(d.count)} project${d.count === 1 ? "" : "s"} found` : "Reading mapped infrastructure";
+        }
+        return done ? `${SL.fmt(d.count)} ${changes ? "changed area" : "candidate"}${d.count === 1 ? "" : "s"} found`
+          : changes ? "Comparing satellite images from two dates" : "Scanning satellite imagery and map data";
+      }
       case "scoring":
         return done ? `Top ${d.ranked} ranked`
           : d.criteria ? `Evaluating ${d.criteria} criteria (${d.measured} with data)`
@@ -169,12 +176,14 @@
           <div class="row-gap">
             <button class="btn-lime" id="retry">${SL.icon("refresh", 16)} Try again</button>
             <button class="btn-outline" id="edit">Edit question</button>
+            ${SL.feedback.button("result", "Report this problem")}
           </div>
         </div>` : "";
 
       if (run.error) {
         SL.$("#retry", el).onclick = () => SL.startAnalysis(run.query, run.radiusKm);
         SL.$("#edit", el).onclick = () => { SL.pendingQuery = run.query; SL.go("#/"); };
+        SL.feedback.attach(SL.$("#an-error", el), {run});
       }
     },
 

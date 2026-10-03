@@ -84,4 +84,21 @@
     return result;
   };
 
+  // POST /research: what web sources report about a place (on request).
+  // Resolves with the response; rejects with {stage, text}.
+  SL.research = async (location, useCase) => {
+    let response;
+    try {
+      response = await fetch(SL.API + "/research", {
+        method: "POST",
+        headers: Object.assign({"Content-Type": "application/json"}, SL.auth.header()),
+        body: JSON.stringify({location, use_case: useCase || null}),
+      });
+    } catch (e) {
+      throw {stage: "network", text: ""};
+    }
+    if (!response.ok) throw apiError(response.status, await response.json().catch(() => null));
+    return response.json();
+  };
+
 })(window.SL);

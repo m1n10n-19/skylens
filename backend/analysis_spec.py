@@ -7,8 +7,10 @@ stated into square metres deterministically (the model is asked to
 copy numbers and units from the request, never to convert them).
 """
 
+import calendar
 import re
 
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -206,6 +208,126 @@ def location_text(raw):
 
 
 # ============================================================
+# TIME RANGE
+# ============================================================
+
+# DeepSeek copies the dates the user stated; they are turned into
+# calendar dates here. "2019" as a start means 1 Jan 2019, as an end
+# 31 Dec 2019; "2019-06" means 1 / 30 June.
+
+_DATE = re.compile(r"^\s*(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?\s*$")
+
+
+def _stated_date(value, end=False):
+    """
+    date for "YYYY", "YYYY-MM" or "YYYY-MM-DD", or None.
+    """
+
+    if isinstance(value, int) and not isinstance(value, bool):
+        value = str(value)
+
+    if not isinstance(value, str):
+        return None
+
+    match = _DATE.match(value)
+
+    if not match:
+        return None
+
+    year = int(match.group(1))
+
+    month = int(match.group(2)) if match.group(2) else (12 if end else 1)
+
+    try:
+
+        if match.group(3):
+            return date(year, month, int(match.group(3)))
+
+        day = calendar.monthrange(year, month)[1] if end else 1
+
+        return date(year, month, day)
+
+    except ValueError:
+        return None
+
+
+def _precision(value):
+    """
+    "year", "month" or "day" for a stated "YYYY[-MM[-DD]]".
+    """
+
+    match = _DATE.match(str(value))
+
+    if not match:
+        return None
+
+    return "day" if match.group(3) else "month" if match.group(2) else "year"
+
+
+def _years_ago(today, years):
+
+    try:
+        return today.replace(year=today.year - years)
+    except ValueError:  # 29 February
+        return today.replace(year=today.year - years, day=28)
+
+
+def parse_time_range(raw, today=None):
+    """
+    TimeRange from DeepSeek's "time_range", or an empty TimeRange.
+
+    Accepted: {"start": "2019", "end": null, "years_back": null,
+               "months_back": null, "as_stated": "since 2019"}
+    Relative ranges ("last 5 years") come as years_back / months_back.
+    Ranges in the future or ending before they start are dropped.
+    """
+
+    today = today or date.today()
+
+    result = TimeRange()
+
+    if not isinstance(raw, dict):
+        return result
+
+    start = _stated_date(raw.get("start"))
+
+    precision = _precision(raw.get("start")) if start else None
+
+    end = _stated_date(raw.get("end"), end=True)
+
+    years = _as_float(raw.get("years_back"))
+
+    months = _as_float(raw.get("months_back"))
+
+    if start is None and years:
+        start = _years_ago(today, int(round(years)))
+        precision = "day"
+
+    if start is None and months:
+        start = today - timedelta(days=round(months * 30.44))
+        precision = "day"
+
+    if end and end > today:
+        end = today
+
+    if start and (start >= (end or today)):
+        return result
+
+    result.start = start.isoformat() if start else None
+
+    result.start_precision = precision if start else None
+
+    result.end = end.isoformat() if end else None
+
+    as_stated = raw.get("as_stated")
+
+    if (result.start or result.end) and isinstance(as_stated, str) and as_stated.strip():
+        result.as_stated = as_stated.strip()
+
+    return result
+
+
+# ============================================================
 # MODEL
 # ============================================================
 
@@ -219,6 +341,22 @@ class AreaRequirement(BaseModel):
 
     # What the user said, e.g. "10 cents"
     as_stated: Optional[str] = None
+
+
+class TimeRange(BaseModel):
+
+    # ISO dates; None when the user did not state them.
+    start: Optional[str] = None
+
+    end: Optional[str] = None
+
+    # What the user said, e.g. "since 2019"
+    as_stated: Optional[str] = None
+
+    # How precisely the start was stated: "year" ("since 2019"),
+    # "month" ("since June 2019") or "day". A year-only start leaves
+    # the time of year open, so change detection can match seasons.
+    start_precision: Optional[str] = None
 
 
 class AnalysisSpec(BaseModel):
@@ -243,6 +381,8 @@ class AnalysisSpec(BaseModel):
     requirements: dict[str, Any] = Field(default_factory=dict)
 
     area: AreaRequirement = Field(default_factory=AreaRequirement)
+
+    time_range: TimeRange = Field(default_factory=TimeRange)
 
     data_needed: list[str] = Field(default_factory=list)
 
@@ -460,6 +600,8 @@ def spec_from_llm(raw, query, use_case_id=None):
         requirements=requirements,
 
         area=_parse_area(requirements),
+
+        time_range=parse_time_range(raw.get("time_range")),
 
         data_needed=_as_list(raw.get("data_needed")),
 

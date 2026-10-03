@@ -47,7 +47,11 @@ from use_cases import (
 
 import auth
 
+import feedback
+
 import ratelimit
+
+import web_research
 
 
 # ============================================================
@@ -1116,6 +1120,127 @@ def analyze_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"}
     )
+
+
+# ============================================================
+# WEB RESEARCH (on request; see web_research.py)
+# ============================================================
+
+class ResearchRequest(BaseModel):
+
+    # Place text, e.g. the analysis's location.
+    location: str
+
+    # Use case id, to pick the analysis-specific search topic.
+    use_case: Optional[str] = None
+
+
+@app.post("/research")
+def research(
+    request: ResearchRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(default=None)
+):
+    """
+    What web sources report about a place: exact quotes with URL,
+    title and dates. Not scored, not verified. Counts against the
+    anonymous question limit when a provider is connected (searches
+    cost credits).
+    """
+
+    provider = web_research.provider_from_env()
+
+    if provider is not None:
+        enforce_question_limit(http_request, authorization)
+
+    return web_research.research(request.location, request.use_case, provider)
+
+
+# ============================================================
+# FEEDBACK
+# ============================================================
+
+class FeedbackRequest(BaseModel):
+
+    # "result" | "site"
+    scope: str
+
+    # "up" | "down" | None
+    verdict: Optional[str] = None
+
+    tags: list[str] = []
+
+    comment: Optional[str] = None
+
+    # The site the feedback is about (scope "site").
+    site_id: Optional[str] = None
+
+    # What the page showed: question, interpretation, site(s) and
+    # their evidence (built by the frontend from the result).
+    context: dict = {}
+
+
+def _feedback_failure(error):
+
+    return HTTPException(
+        status_code=error.status,
+        detail={"stage": "feedback", "error": error.message}
+    )
+
+
+@app.post("/feedback")
+def send_feedback(
+    request: FeedbackRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(default=None)
+):
+    """
+    Store feedback on a result or one site. Does not count against the
+    question limit; visitors have a separate daily feedback limit.
+    """
+
+    logged_in = auth.session_user(authorization) is not None
+
+    try:
+        entry = feedback.validate(request.model_dump(), logged_in)
+
+        if not logged_in:
+            feedback.check_limit(ratelimit.client_ip(http_request))
+
+    except feedback.FeedbackError as error:
+        raise _feedback_failure(error)
+
+    try:
+        new_id = feedback.save(entry)
+    except Exception as error:
+        print("FEEDBACK NOT SAVED:", repr(error))
+        raise HTTPException(
+            status_code=503,
+            detail={"stage": "feedback", "error": "Feedback could not be saved right now. Please try again later."}
+        )
+
+    return {"id": new_id}
+
+
+@app.get("/feedback")
+def list_feedback(
+    since_id: int = 0,
+    limit: int = 500,
+    authorization: Optional[str] = Header(default=None)
+):
+    """
+    Stored feedback, oldest first (signed-in team members only).
+    """
+
+    if auth.session_user(authorization) is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"stage": "auth", "error": "Sign in to read feedback."}
+        )
+
+    found = feedback.entries(since_id, max(1, min(limit, 2000)))
+
+    return {"storage": feedback.storage_name(), "count": len(found), "entries": found}
 
 
 # ============================================================

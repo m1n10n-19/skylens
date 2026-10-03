@@ -65,6 +65,9 @@ window.SL = window.SL || {};
     return `${base} (≈ ${SL.fmt(value, value < 10 ? 1 : 0)} ${unit[2]})`;
   };
 
+  // "Weight 15%", or "Evidence only, not scored" for weight 0.
+  SL.weightText = w => w > 0 ? `Weight ${Math.round(w * 100)}%` : "Evidence only, not scored";
+
   SL.confidenceBadge = c => {
     const level = String(c || "low").toLowerCase();
     return `<span class="badge badge-${SL.esc(level)}">${SL.esc(SL.cap(level))}</span>`;
@@ -115,6 +118,9 @@ window.SL = window.SL || {};
     copy: "M9 9h11v11H9zM5 15H4V4h11v1",
     refresh: "M20 12a8 8 0 11-2.3-5.7M20 4v5h-5",
     info: "M12 21a9 9 0 100-18 9 9 0 000 18zM12 11v5M12 8v.01",
+    message: "M4 5h16v11H9l-5 4z",
+    thumbUp: "M7 11v9H4v-9zM7 11l4-8a2 2 0 012 2v4h5.5a2 2 0 012 2.3l-1.2 7A2 2 0 0117.3 20H7",
+    thumbDown: "M7 13V4H4v9zM7 13l4 8a2 2 0 002-2v-4h5.5a2 2 0 002-2.3l-1.2-7A2 2 0 0017.3 4H7",
   };
 
   SL.icon = (name, size = 18, cls = "") =>
@@ -130,13 +136,18 @@ window.SL = window.SL || {};
     points_of_interest: ["Commercial activity", "store"],
     ev_chargers: ["Existing EV chargers", "bolt"],
     parking: ["Parking", "parking"],
-    flood_risk: ["Flood risk", "shield"],
+    flood_risk: ["Flood exposure", "shield"],
     population: ["Population", "users"],
     zoning: ["Zoning", "layers"],
     ownership: ["Ownership", "file"],
     solar_irradiance: ["Solar irradiance", "sun"],
     shading: ["Shading", "sun"],
     historical_imagery: ["Historical imagery", "satellite"],
+    terrain: ["Terrain", "chart"],
+    land_cover: ["Open land in imagery", "satellite"],
+    infrastructure: ["Infrastructure", "road"],
+    land_in_use: ["Land in use", "building"],
+    protected_areas: ["Protected areas", "shield"],
     site_registry: ["Your sites", "folder"],
   };
 
@@ -150,7 +161,12 @@ window.SL = window.SL || {};
     ev_charging_site_selection: "EV charging opportunity",
     commercial_site_selection: "Commercial site opportunity",
     land_acquisition: "Land opportunity",
+    construction_progress: "Detected change",
+    infrastructure_outlook: "Infrastructure",
   };
+
+  // What one ranked result is called: "Site #1" or "Change #1".
+  SL.rankNoun = useCaseId => useCaseId === "construction_progress" ? "Change" : "Site";
 
   // ---------------------------------------------------------- storage
 
@@ -213,6 +229,21 @@ window.SL = window.SL || {};
       memory.history.slice(KEEP_RESULTS).forEach(h => { delete memory.results[h.id]; });
       save();
       return id;
+    },
+
+    // A web check that ran counts as a question, as on the server.
+    useQuestion() {
+      load();
+      if (!SL.unlimited()) memory.used += 1;
+      save();
+    },
+
+    // Store changes to a saved result (e.g. web findings added later).
+    update(id, result) {
+      load();
+      if (!memory.results[id]) return;
+      memory.results[id] = result;
+      save();
     },
 
     clearHistory() {

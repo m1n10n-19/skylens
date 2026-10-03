@@ -112,6 +112,9 @@ class UseCase:
 
     implemented: bool = True
 
+    # Add open land found in imagery (landcover.py) to the OSM candidates.
+    discover_open_land: bool = False
+
     aliases: tuple = ()
 
 
@@ -262,6 +265,12 @@ EV_CHARGING = UseCase(
         "points_of_interest",
         "ev_chargers",
         "flood_risk",
+        "historical_imagery",
+        "terrain",
+        "land_cover",
+        "protected_areas",
+        "land_in_use",
+        "infrastructure",
     ),
 
     criteria=(
@@ -324,12 +333,53 @@ EV_CHARGING = UseCase(
 
         Criterion(
             id="flood_risk",
-            label="Flood risk",
+            label="Flood exposure (observed)",
             weight=0.15,
             data_layer="flood_risk",
-            missing_note="No flood-risk data connected.",
+            evaluator="flood_exposure",
+        ),
+
+        Criterion(
+            id="recent_change",
+            label="Recent change on site (Sentinel-2)",
+            # Evidence only: change is reported, not scored, because
+            # its meaning is ambiguous (clearing may mean "ready to build").
+            weight=0.0,
+            data_layer="historical_imagery",
+            evaluator="recent_change",
+        ),
+
+        Criterion(
+            id="terrain",
+            label="Terrain (Copernicus DEM)",
+            # Evidence only: Chennai-area terrain is flat and the
+            # model's ~2 m noise is close to real differences.
+            weight=0.0,
+            data_layer="terrain",
+            evaluator="terrain",
+        ),
+
+        Criterion(
+            id="protected_status",
+            label="Protected or in-use land (OpenStreetMap)",
+            # Evidence only; sites entirely inside a protected area are
+            # excluded before ranking.
+            weight=0.0,
+            data_layer="protected_areas",
+            evaluator="protected_status",
+        ),
+
+        Criterion(
+            id="infrastructure",
+            label="Infrastructure and projects nearby (OpenStreetMap)",
+            # Evidence only; a power line over the site warns.
+            weight=0.0,
+            data_layer="infrastructure",
+            evaluator="infrastructure_access",
         ),
     ),
+
+    discover_open_land=True,
 
     constraints=(
         "Site should be vacant land.",
@@ -410,6 +460,12 @@ COMMERCIAL_SITE_SELECTION = UseCase(
         "points_of_interest",
         "parking",
         "population",
+        "historical_imagery",
+        "terrain",
+        "land_cover",
+        "protected_areas",
+        "land_in_use",
+        "infrastructure",
     ),
 
     criteria=(
@@ -469,7 +525,59 @@ COMMERCIAL_SITE_SELECTION = UseCase(
             data_layer="population",
             missing_note="No population or footfall data connected.",
         ),
+
+        Criterion(
+            id="vacancy",
+            label="Vacancy evidence",
+            # Evidence only here: shows land cover, tags and mapped
+            # building cover for open land without changing commercial
+            # scores. (Not measured for building candidates.)
+            weight=0.0,
+            data_layer="land_parcels",
+            evaluator="vacancy_evidence",
+        ),
+
+        Criterion(
+            id="recent_change",
+            label="Recent change on site (Sentinel-2)",
+            # Evidence only: change is reported, not scored, because
+            # its meaning is ambiguous (clearing may mean "ready to build").
+            weight=0.0,
+            data_layer="historical_imagery",
+            evaluator="recent_change",
+        ),
+
+        Criterion(
+            id="terrain",
+            label="Terrain (Copernicus DEM)",
+            # Evidence only: Chennai-area terrain is flat and the
+            # model's ~2 m noise is close to real differences.
+            weight=0.0,
+            data_layer="terrain",
+            evaluator="terrain",
+        ),
+
+        Criterion(
+            id="protected_status",
+            label="Protected or in-use land (OpenStreetMap)",
+            # Evidence only; sites entirely inside a protected area are
+            # excluded before ranking.
+            weight=0.0,
+            data_layer="protected_areas",
+            evaluator="protected_status",
+        ),
+
+        Criterion(
+            id="infrastructure",
+            label="Infrastructure and projects nearby (OpenStreetMap)",
+            # Evidence only; a power line over the site warns.
+            weight=0.0,
+            data_layer="infrastructure",
+            evaluator="infrastructure_access",
+        ),
     ),
+
+    discover_open_land=True,
 
     constraints=(
         "Site must fit the requested floor/land area.",
@@ -541,6 +649,12 @@ LAND_ACQUISITION = UseCase(
         "zoning",
         "flood_risk",
         "ownership",
+        "historical_imagery",
+        "terrain",
+        "land_cover",
+        "protected_areas",
+        "land_in_use",
+        "infrastructure",
     ),
 
     criteria=(
@@ -587,12 +701,53 @@ LAND_ACQUISITION = UseCase(
 
         Criterion(
             id="flood_risk",
-            label="Flood risk",
+            label="Flood exposure (observed)",
             weight=0.15,
             data_layer="flood_risk",
-            missing_note="No flood-risk data connected.",
+            evaluator="flood_exposure",
+        ),
+
+        Criterion(
+            id="recent_change",
+            label="Recent change on site (Sentinel-2)",
+            # Evidence only: change is reported, not scored, because
+            # its meaning is ambiguous (clearing may mean "ready to build").
+            weight=0.0,
+            data_layer="historical_imagery",
+            evaluator="recent_change",
+        ),
+
+        Criterion(
+            id="terrain",
+            label="Terrain (Copernicus DEM)",
+            # Evidence only: Chennai-area terrain is flat and the
+            # model's ~2 m noise is close to real differences.
+            weight=0.0,
+            data_layer="terrain",
+            evaluator="terrain",
+        ),
+
+        Criterion(
+            id="protected_status",
+            label="Protected or in-use land (OpenStreetMap)",
+            # Evidence only; sites entirely inside a protected area are
+            # excluded before ranking.
+            weight=0.0,
+            data_layer="protected_areas",
+            evaluator="protected_status",
+        ),
+
+        Criterion(
+            id="infrastructure",
+            label="Infrastructure and projects nearby (OpenStreetMap)",
+            # Evidence only; a power line over the site warns.
+            weight=0.0,
+            data_layer="infrastructure",
+            evaluator="infrastructure_access",
         ),
     ),
+
+    discover_open_land=True,
 
     constraints=(
         "Land should be vacant.",
@@ -637,71 +792,150 @@ CONSTRUCTION_PROGRESS = UseCase(
 
     id="construction_progress",
 
-    title="Construction progress monitoring",
+    title="Land and construction change",
 
     description=(
-        "Detect how construction sites have changed between "
-        "two dates using current vs historical imagery."
+        "Find where land changed in an area between two dates: "
+        "construction or clearing, vegetation loss or gain, water "
+        "appearing or receding. Compares satellite imagery: "
+        "Sentinel-2 (10 m) from 2017, Landsat (30 m) for periods "
+        "back to 1984. Default period: the last 12 months."
     ),
 
     example_queries=(
-        "Which of my construction sites have changed "
-        "significantly since last month?",
+        "What has changed around Thoraipakkam in the last year?",
+        "Where has new construction or land clearing appeared "
+        "along OMR since 2023?",
     ),
 
-    candidate_type="construction_site",
+    candidate_type="change_area",
 
-    candidate_noun="construction site",
+    candidate_noun="changed area",
 
-    candidate_source=None,
+    candidate_source="changes",
 
     data_layers=(
-        "site_registry",
         "satellite_imagery",
         "historical_imagery",
     ),
 
+    # Ranks changes by significance: how strong, how large, and how
+    # comparable the two scenes are.
     criteria=(
 
         Criterion(
             id="change_magnitude",
-            label="Estimated change magnitude",
-            weight=0.5,
+            label="Change strength",
+            weight=0.45,
             data_layer="historical_imagery",
-            missing_note="Change detection is not implemented.",
+            evaluator="change_magnitude",
         ),
 
         Criterion(
             id="changed_area",
             label="Changed area",
-            weight=0.3,
+            weight=0.35,
             data_layer="historical_imagery",
-            missing_note="Change detection is not implemented.",
+            evaluator="changed_area",
         ),
 
         Criterion(
             id="imagery_quality",
             label="Imagery quality (cloud cover, date gap)",
             weight=0.2,
-            data_layer="satellite_imagery",
-            missing_note="Change detection is not implemented.",
+            data_layer="historical_imagery",
+            evaluator="imagery_quality",
         ),
     ),
 
-    output_format="change_report",
-
-    limitations=(
-        "SkyLens cannot yet compare imagery between dates.",
-
-        "SkyLens has no registry of the customer's sites.",
+    unassessed=(
+        "cause_of_change",
+        "permits",
     ),
 
-    implemented=False,
+    # 5 pixels at 10 m (Landsat's own 5-pixel minimum is larger).
+    default_min_area_m2=500,
+
+    output_format="change_report",
+
+    purpose="significance of change",
+
+    recommended_action=(
+        "Review the largest, strongest changes on recent "
+        "high-resolution imagery, then confirm the cause on the ground."
+    ),
+
+    limitations=(
+        "Changes smaller than about 500 m² (Sentinel-2, 10 m) or "
+        "4,500 m² (Landsat, 30 m, used before 2017) are not detected.",
+
+        "Spectral change shows that a surface changed, not why: "
+        "construction, clearing, farming and flooding can look alike.",
+
+        "Only two dates are compared; changes that started and "
+        "reverted between them are missed.",
+    ),
 
     aliases=(
         "construction_monitoring",
         "change_detection",
         "construction_change_detection",
+    ),
+)
+
+
+INFRASTRUCTURE_OUTLOOK = UseCase(
+
+    id="infrastructure_outlook",
+
+    title="Infrastructure outlook",
+
+    description=(
+        "Report what infrastructure exists and what is being built or "
+        "proposed near a place: metro and rail, roads, stations, power, "
+        "airports and large developments, with distances. No ranking."
+    ),
+
+    example_queries=(
+        "What major infrastructure is coming near Velachery?",
+        "Is there a metro or new road planned near OMR Thoraipakkam?",
+    ),
+
+    candidate_type="infrastructure",
+
+    candidate_noun="project",
+
+    candidate_source="infrastructure",
+
+    data_layers=(
+        "satellite_imagery",
+        "infrastructure",
+    ),
+
+    criteria=(),
+
+    output_format="infrastructure_report",
+
+    purpose="infrastructure near the place",
+
+    recommended_action=(
+        "Check the projects that matter to you with the implementing "
+        "agency (dates, alignment, land acquisition), and use 'Check the "
+        "web' for reported announcements."
+    ),
+
+    limitations=(
+        "Projects are only those tagged under construction or proposed on "
+        "OpenStreetMap; announced projects that are not mapped are missing.",
+
+        "Completion dates, funding and approvals are not known from the map.",
+    ),
+
+    aliases=(
+        "infrastructure",
+        "infrastructure_projects",
+        "planned_infrastructure",
+        "upcoming_infrastructure",
     ),
 )
 
@@ -716,6 +950,7 @@ USE_CASES = {
         COMMERCIAL_SITE_SELECTION,
         LAND_ACQUISITION,
         CONSTRUCTION_PROGRESS,
+        INFRASTRUCTURE_OUTLOOK,
     )
 }
 

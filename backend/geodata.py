@@ -14,8 +14,8 @@ import math
 
 from dataclasses import dataclass, field
 
-from shapely.geometry import LineString, Point, Polygon, mapping
-from shapely.ops import transform
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon, mapping, shape as to_shape
+from shapely.ops import linemerge, polygonize, transform, unary_union
 
 from overpass import provenance as _provenance
 from overpass import query_overpass as _query_overpass
@@ -163,11 +163,12 @@ def _site_type(tags):
     return "unknown", "unknown"
 
 
-def candidate_selectors(source):
+def candidate_selectors(source, land_only=False):
     """
     Overpass selectors for a candidate source:
     "land_parcels" = open / vacant land polygons (NOT cadastral),
-    "sites" = open land plus existing commercial buildings.
+    "sites" = open land plus existing commercial buildings (open land
+    only when land_only: the question asked for land).
     """
 
     if source == "land_parcels":
@@ -185,9 +186,9 @@ def candidate_selectors(source):
             f'way["{key}"="{value}"]'
             for key, value in OPEN_LAND_TAGS
             if value != "farmland"
-        ] + [
+        ] + ([] if land_only else [
             f'way["building"~"^({types})$"]'
-        ]
+        ])
 
     raise ValueError(f"Unknown candidate source: {source}")
 
@@ -306,6 +307,35 @@ class Road:
 
 
 @dataclass
+class ProtectedArea:
+    """
+    A mapped protected area, reserved forest or wetland (metric shape).
+    kind: "protected_area" | "reserve_forest" | "wetland".
+    """
+
+    shape: object
+
+    name: str | None
+
+    kind: str
+
+    title: str | None = None
+
+
+@dataclass
+class LandInUse:
+    """
+    A mapped area already in use (campus, school, park...), metric.
+    """
+
+    shape: object
+
+    name: str | None
+
+    use: str
+
+
+@dataclass
 class Context:
     """
     Everything the criterion evaluators can measure against.
@@ -327,11 +357,22 @@ class Context:
 
     parking: list = field(default_factory=list)
 
+    protected: list = field(default_factory=list)
+
+    in_use: list = field(default_factory=list)
+
+    # Mapped building footprints (metric polygons).
+    buildings: list = field(default_factory=list)
+
     # layer id -> "loaded" for every layer that was fetched
     layer_status: dict = field(default_factory=dict)
 
     # layer id -> {"data_as_of", "retrieved_at"} (overpass.provenance)
     layer_provenance: dict = field(default_factory=dict)
+
+    # Analysis-specific facts for the report, e.g. which imagery
+    # dates a change detection compared.
+    meta: dict = field(default_factory=dict)
 
     def has_layer(self, layer_id):
 
@@ -354,7 +395,41 @@ CONTEXT_LAYERS = (
     "points_of_interest",
     "ev_chargers",
     "parking",
+    "protected_areas",
+    "building_footprints",
+    "land_in_use",
 )
+
+
+# Land already in use by an institution or as public open space: not
+# available for most projects. Residential, commercial and industrial
+# land-use areas are left out on purpose: in OpenStreetMap they usually
+# cover whole neighbourhoods, empty plots included.
+IN_USE_AMENITIES = ("university", "college", "school", "kindergarten", "hospital",
+                    "place_of_worship", "grave_yard")
+
+IN_USE_LANDUSE = ("education", "institutional", "religious", "cemetery", "military",
+                  "recreation_ground")
+
+IN_USE_LEISURE = ("park", "garden", "pitch", "sports_centre", "stadium", "golf_course",
+                  "playground")
+
+
+def in_use_kind(tags):
+    """
+    What a land-in-use area is used for (e.g. "university"), or None.
+    """
+
+    if tags.get("amenity") in IN_USE_AMENITIES:
+        return tags["amenity"]
+
+    if tags.get("landuse") in IN_USE_LANDUSE:
+        return tags["landuse"]
+
+    if tags.get("leisure") in IN_USE_LEISURE:
+        return tags["leisure"]
+
+    return None
 
 
 def new_context(latitude, longitude, radius_km, location_name=None):
@@ -369,13 +444,40 @@ def new_context(latitude, longitude, radius_km, location_name=None):
     )
 
 
-def _context_statements(layers):
+def area_filters(area, margin_m):
     """
-    Context statements, relative to the candidate set ".cands", so
-    only data near candidates is downloaded.
+    Overpass poly filters for the search area grown by margin_m, so
+    context near any candidate in the area is fetched, including
+    candidates found later in imagery.
+    """
+
+    from search_area import _poly_filter
+
+    proj = LocalProjection(area.latitude, area.longitude)
+
+    if area.geometry:
+        outline = to_shape(area.geometry)
+    else:
+        south, west, north, east = bbox_around(area.latitude, area.longitude, area.reach_km)
+        outline = Polygon([(west, south), (east, south), (east, north), (west, north)])
+
+    grown = transform(lambda x, y, z=None: proj.to_xy(x, y), outline).buffer(margin_m)
+
+    parts = grown.geoms if isinstance(grown, MultiPolygon) else [grown]
+
+    return [_poly_filter(part, proj)[1] for part in parts]
+
+
+def _context_statements(layers, area):
+    """
+    Context statements covering the whole search area plus each
+    layer's measuring distance.
     """
 
     statements = []
+
+    def each(selector, margin_m):
+        return [f"{selector}{f};" for f in area_filters(area, margin_m)]
 
     if "roads" in layers:
 
@@ -383,43 +485,34 @@ def _context_statements(layers):
 
         major = "|".join(sorted(MAJOR_ROADS))
 
-        statements.append(
-            f'way(around.cands:{ROAD_RADIUS_M})["highway"~"^({vehicle})$"];\n'
-            f'out tags geom;\n'
-            f'way(around.cands:{MAJOR_ROAD_RADIUS_M})["highway"~"^({major})$"];\n'
-            f'out tags geom;'
+        roads = (
+            each(f'way["highway"~"^({vehicle})$"]', ROAD_RADIUS_M)
+            + each(f'way["highway"~"^({major})$"]', MAJOR_ROAD_RADIUS_M)
         )
+
+        statements.append("(\n  " + "\n  ".join(roads) + "\n);\nout tags geom;")
 
     points = []
 
     if "points_of_interest" in layers:
 
-        r = POI_RADIUS_M
-
         amenities = "|".join(sorted(COMMERCIAL_AMENITIES))
 
         for kind in ("node", "way"):
-            points += [
-                f'{kind}(around.cands:{r})["shop"];',
-                f'{kind}(around.cands:{r})["office"];',
-                f'{kind}(around.cands:{r})["tourism"~"^(hotel|motel|attraction)$"];',
-                f'{kind}(around.cands:{r})["amenity"~"^({amenities})$"];',
-            ]
+            points += each(f'{kind}["shop"]', POI_RADIUS_M)
+            points += each(f'{kind}["office"]', POI_RADIUS_M)
+            points += each(f'{kind}["tourism"~"^(hotel|motel|attraction)$"]', POI_RADIUS_M)
+            points += each(f'{kind}["amenity"~"^({amenities})$"]', POI_RADIUS_M)
 
     if "parking" in layers:
 
         for kind in ("node", "way"):
-            points.append(
-                f'{kind}(around.cands:{PARKING_RADIUS_M})["amenity"="parking"];'
-            )
+            points += each(f'{kind}["amenity"="parking"]', PARKING_RADIUS_M)
 
     if "ev_chargers" in layers:
 
         for kind in ("node", "way"):
-            points.append(
-                f'{kind}(around.cands:{CHARGER_RADIUS_M})'
-                f'["amenity"="charging_station"];'
-            )
+            points += each(f'{kind}["amenity"="charging_station"]', CHARGER_RADIUS_M)
 
     if points:
 
@@ -427,11 +520,93 @@ def _context_statements(layers):
             "(\n  " + "\n  ".join(points) + "\n);\nout tags center;"
         )
 
+    if "building_footprints" in layers:
+
+        statements.append(
+            "(\n  " + "\n  ".join(each('way["building"]', 0)) + "\n);\nout tags geom;"
+        )
+
+    if "land_in_use" in layers:
+
+        in_use = (
+            each(f'wr["amenity"~"^({"|".join(IN_USE_AMENITIES)})$"]', 0)
+            + each(f'wr["landuse"~"^({"|".join(IN_USE_LANDUSE)})$"]', 0)
+            + each(f'wr["leisure"~"^({"|".join(IN_USE_LEISURE)})$"]', 0)
+        )
+
+        statements.append("(\n  " + "\n  ".join(in_use) + "\n);\nout tags geom;")
+
+    if "protected_areas" in layers:
+
+        protected = (
+            each('wr["boundary"="protected_area"]', 0)
+            + each('wr["leisure"="nature_reserve"]', 0)
+            + each('wr["natural"="wetland"]', 0)
+            + each('wr["landuse"="forest"]["name"~"[Rr]eserve"]', 0)
+        )
+
+        statements.append("(\n  " + "\n  ".join(protected) + "\n);\nout tags geom;")
+
     return statements
 
 
+# ------------------------------------------------------------
+# Protected areas
+# ------------------------------------------------------------
+
+def protected_kind(tags):
+    """
+    "protected_area", "reserve_forest", "wetland" or None.
+    """
+
+    if tags.get("boundary") == "protected_area" or tags.get("leisure") == "nature_reserve":
+        return "protected_area"
+
+    if "reserve" in (tags.get("name") or "").lower() and (
+        tags.get("landuse") == "forest" or tags.get("natural") == "wood"
+    ):
+        return "reserve_forest"
+
+    if tags.get("natural") == "wetland":
+        return "wetland"
+
+    return None
+
+
+def _protected_shape(element, proj):
+    """
+    Metric polygon of a protected way or multipolygon relation, or None.
+    """
+
+    if element.get("type") == "way":
+        return _polygon(element.get("geometry"), proj)
+
+    outer, inner = [], []
+
+    for member in element.get("members", []):
+
+        geometry = member.get("geometry")
+
+        if member.get("type") != "way" or not geometry or len(geometry) < 2:
+            continue
+
+        line = LineString([proj.to_xy(p["lon"], p["lat"]) for p in geometry])
+
+        (inner if member.get("role") == "inner" else outer).append(line)
+
+    if not outer:
+        return None
+
+    shape = unary_union(list(polygonize(linemerge(outer))))
+
+    if inner:
+        shape = shape.difference(unary_union(list(polygonize(linemerge(inner)))))
+
+    return None if shape.is_empty else shape
+
+
 def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
-                                   layers=(), location_name=None):
+                                   layers=(), location_name=None, land_only=False):
     """
     ONE Overpass request returning the candidate polygons inside the
     search area (search_area.SearchArea) and the context layers
@@ -448,15 +623,15 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
 
     selectors = "\n  ".join(
         f"{selector}{area_filter};"
-        for selector in candidate_selectors(source)
+        for selector in candidate_selectors(source, land_only)
         for area_filter in area.overpass_filters
     )
 
     query = (
-        "[out:json][timeout:60];\n"
+        "[out:json][timeout:90];\n"
         f"(\n  {selectors}\n)->.cands;\n"
         ".cands out tags geom;\n"
-        + "\n".join(_context_statements(layers))
+        + "\n".join(_context_statements(layers, area))
     )
 
     data = _query_overpass(query)
@@ -469,6 +644,12 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
 
     points = {}
 
+    protected = {}
+
+    in_use = {}
+
+    buildings = {}
+
     for element in data.get("elements", []):
 
         key = (element.get("type"), element.get("id"))
@@ -476,6 +657,49 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
         tags = element.get("tags", {})
 
         geometry = element.get("geometry")
+
+        kind = protected_kind(tags) if "protected_areas" in layers else None
+
+        if kind:
+
+            if key not in protected:
+
+                shape = _protected_shape(element, proj)
+
+                if shape is not None:
+                    protected[key] = ProtectedArea(
+                        shape, tags.get("name"), kind,
+                        tags.get("protection_title") or tags.get("designation"),
+                    )
+
+            continue
+
+        use = in_use_kind(tags) if "land_in_use" in layers else None
+
+        if use:
+
+            if key not in in_use:
+
+                shape = _protected_shape(element, proj)
+
+                if shape is not None:
+                    in_use[key] = LandInUse(shape, tags.get("name"), use)
+
+            continue
+
+        if geometry and tags.get("building") and "building_footprints" in layers:
+
+            if key not in buildings:
+
+                shape = _polygon(geometry, proj)
+
+                if shape is not None:
+                    buildings[key] = shape
+
+            # Only commercial buildings in a "sites" analysis are candidates.
+            if not (source == "sites" and not land_only
+                    and tags["building"] in COMMERCIAL_BUILDING_TYPES):
+                continue
 
         # Roads and candidates come with full geometry; POIs,
         # parking and chargers come as points (node or centre).
@@ -518,6 +742,12 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
 
     context.roads = list(roads.values())
 
+    context.protected = list(protected.values())
+
+    context.in_use = list(in_use.values())
+
+    context.buildings = list(buildings.values())
+
     for poi in points.values():
 
         amenity = poi.value("amenity")
@@ -553,6 +783,29 @@ def collect_candidates_and_context(source, area, min_area_m2, max_area_m2=None,
 # ============================================================
 # MEASUREMENT HELPERS
 # ============================================================
+
+def building_cover(context, shape):
+    """
+    Share of a shape covered by mapped building footprints (0-1).
+    """
+
+    from shapely import STRtree
+
+    if not context.buildings or shape.area == 0:
+        return 0.0
+
+    tree = context.meta.get("_building_index")
+
+    if tree is None:
+        tree = context.meta["_building_index"] = STRtree(context.buildings)
+
+    hits = [context.buildings[i] for i in tree.query(shape)]
+
+    if not hits:
+        return 0.0
+
+    return min(1.0, unary_union([shape.intersection(b) for b in hits]).area / shape.area)
+
 
 def nearest_road(context, shape, max_distance_m, major_only=False):
     """

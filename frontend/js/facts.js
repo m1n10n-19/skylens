@@ -123,12 +123,14 @@
     return isNaN(d) ? null : d.toLocaleDateString("en-IN", {day: "numeric", month: "short", year: "numeric"});
   };
 
-  // "OpenStreetMap (Overpass), data as of 30 Sep 2026" for one criterion.
+  // "OpenStreetMap (Overpass), data as of 30 Sep 2026" or
+  // "Microsoft Planetary Computer, imaged 26 Sep 2026" for one criterion.
   function sourceLine(crit) {
     const item = (crit.evidence_items || []).find(i => i.source);
     if (!item) return "";
+    const imaged = item.observed_at && day(item.observed_at);
     const asOf = item.data_as_of && day(item.data_as_of);
-    return SL.esc(item.source) + (asOf ? `, data as of ${asOf}` : "");
+    return SL.esc(item.source) + (imaged ? `, imaged ${imaged}` : asOf ? `, data as of ${asOf}` : "");
   }
 
   SL.evidence = {
@@ -215,6 +217,84 @@
     day,
   };
 
+  // ---------------------------------------------------------- web findings
+
+  const WEB_TYPES = {government: "Government", news: "News", web: "Web"};
+
+  SL.webFindingsHTML = research => {
+    if (!research) return "";
+    if (research.status !== "success") {
+      return `<p class="muted sm">${SL.esc(research.message || "Web research could not be run.")}</p>`;
+    }
+    if (!research.findings.length) {
+      return `<p class="muted sm">No web pages mentioning ${SL.esc(research.place)} were found for these topics.</p>`;
+    }
+    const groups = {};
+    research.findings.forEach(f => { (groups[f.topic_label] = groups[f.topic_label] || []).push(f); });
+    return `
+      <p class="muted sm">${SL.esc(research.note)}</p>
+      ${Object.entries(groups).map(([label, items]) => `
+        <h4 class="web-topic">${SL.esc(label)}</h4>
+        <ul class="web-list">${items.map(f => `
+          <li>
+            ${f.quotes.map(q => `<blockquote>“${SL.esc(q)}”</blockquote>`).join("")}
+            <div class="web-src">
+              <span class="basis basis-observed" title="Claimed by the source; not verified by SkyLens">Reported</span>
+              <a class="link" href="${SL.esc(f.url)}" target="_blank" rel="noopener noreferrer">${SL.esc(f.title || f.domain)}</a>
+              · ${SL.esc(WEB_TYPES[f.source_type] || f.source_type)} · ${SL.esc(f.domain || "")}
+              ${f.published_at ? (f.date_source === "url" ? ` · published ${SL.evidence.day(f.published_at)}`
+                : ` · dated ${SL.evidence.day(f.published_at)} by the search provider`) : " · no publication date"}
+              · retrieved ${SL.evidence.day(f.retrieved_at)}
+            </div>
+          </li>`).join("")}</ul>`).join("")}`;
+  };
+
+  // ---------------------------------------------------------- infrastructure
+
+  const STATUS_LABEL = {under_construction: "Under construction", proposed: "Proposed", existing: "Existing"};
+
+  // Map colours by status (also used for the legend).
+  SL.INFRA_COLORS = {existing: "#8fb3ff", under_construction: "#f2c94c", proposed: "#ef6b5e"};
+
+  const infraItem = p => `<li><b>${SL.esc(p.name || p.label)}</b>
+      <span class="muted sm">${SL.esc(p.label)}${p.detail ? ` (${SL.esc(String(p.detail).replace(/_/g, " "))})` : ""}
+      · ${p.distance_m ? SL.dist(p.distance_m) + " away" : "in the area"}</span></li>`;
+
+  // compact: the card on site results; otherwise the full report.
+  SL.infraHTML = (report, {compact = false} = {}) => {
+    if (!report) return "";
+    const all = report.under_construction.concat(report.proposed)
+      .sort((a, b) => a.distance_m - b.distance_m);
+    // Transport and utility projects first; developments after.
+    const works = all.filter(p => p.kind !== "development");
+    const developments = all.filter(p => p.kind === "development");
+    const projects = works.concat(developments);
+    const list = items => `<ul class="infra-list">${items.map(p => infraItem(p).replace("<li>",
+      `<li><span class="status-dot" style="background:${SL.INFRA_COLORS[p.status]}"></span>
+       <span class="sm">${STATUS_LABEL[p.status]}</span> `)).join("")}</ul>`;
+    const shown = projects.slice(0, 5);
+    return `
+      ${!projects.length ? `<p class="muted sm">No projects mapped as under construction or proposed within 5 km.</p>`
+        : compact ? `
+        <h4 class="web-topic">Projects within 5 km (${projects.length})</h4>
+        ${list(shown)}
+        ${projects.length > shown.length ? `<p class="muted sm">and ${projects.length - shown.length} more.</p>` : ""}`
+        : `
+        <h4 class="web-topic">Transport and utility projects within 5 km (${works.length})</h4>
+        ${works.length ? list(works) : `<p class="muted sm">None mapped.</p>`}
+        <h4 class="web-topic">Large developments within 5 km (${developments.length})</h4>
+        ${developments.length ? list(developments) : `<p class="muted sm">None mapped.</p>`}`}
+      <h4 class="web-topic">Existing infrastructure</h4>
+      <ul class="infra-list">${report.existing.map(e => `<li><b>${SL.esc(e.label)}</b>
+        <span class="muted sm">nearest ${e.name ? SL.esc(e.name) + ", " : ""}${e.distance_m ? SL.dist(e.distance_m) + " away" : "in the area"}
+        · ${e.count_within_radius} within ${SL.dist(e.radius_m)}</span></li>`).join("")
+        || `<li class="muted sm">None mapped within the search distances.</li>`}</ul>
+      ${report.power_lines_in_area ? `<p class="sm">${report.power_lines_in_area} high-tension power line(s) cross the searched area.</p>` : ""}
+      ${compact ? "" : `<h4 class="web-topic">Not known from the map</h4>
+        <ul class="muted sm">${report.unknowns.map(u => `<li>${SL.esc(u)}</li>`).join("")}</ul>`}
+      <p class="muted sm">Source: ${SL.esc(report.source)}.</p>`;
+  };
+
   SL.facts = {
 
     level,
@@ -225,6 +305,8 @@
     },
 
     typeLabel(candidate) {
+      if (candidate.change_type) return "Change";
+      if (candidate.discovered) return "Land cover (2021 map)";
       return candidate.site_type ? "Land use (inferred)" : "Building type";
     },
 
@@ -239,6 +321,8 @@
         ["Approx. area", SL.areaText(candidate.area_m2, spec)],
         [SL.facts.typeLabel(candidate), SL.facts.typeValue(candidate)],
       ];
+
+      if (candidate.interpretation) rows.push(["What it may mean", SL.esc(candidate.interpretation)]);
 
       Object.entries(candidate.criteria || {}).forEach(([id, crit]) => {
         if (SKIP.has(id)) return;

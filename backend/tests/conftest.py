@@ -6,19 +6,30 @@ Planetary Computer are replaced with fakes that return fixed data.
 """
 
 import math
+import uuid
 import os
+
+from datetime import date, datetime, timedelta, timezone
 
 # main.py refuses to import without a key; set a dummy one first.
 # load_dotenv() does not override variables that are already set.
 os.environ.setdefault("DEEPSEEK_API_KEY", "test-key")
 
+import numpy as np
 import pytest
 
 from fastapi.testclient import TestClient
 
 import buildings
+import change_detection
+import flood
 import geodata
+import landcover
+import ml_buildings
+import web_research
+import terrain
 import main
+import feedback
 import pipeline
 import ratelimit
 
@@ -288,11 +299,145 @@ def planner_reply(intent_type, location="Adyar, Chennai", **extra):
 
 
 # ============================================================
+# FAKE SENTINEL-2 IMAGERY
+# ============================================================
+
+class FakeAsset:
+
+    def __init__(self, href):
+        self.href = href
+
+
+SENTINEL_ASSETS = ("B03", "B04", "B08", "B11", "SCL")
+
+LANDSAT_ASSETS = ("green", "red", "nir08", "swir16", "qa_pixel")
+
+
+class FakeItem:
+
+    def __init__(self, scene_id, day, cloud=5.0, baseline="05.11", platform="sentinel-2a"):
+        self.id = scene_id
+        self.datetime = datetime(day.year, day.month, day.day, 5, tzinfo=timezone.utc)
+        self.properties = {"eo:cloud_cover": cloud, "s2:processing_baseline": baseline,
+                           "platform": platform}
+        names = LANDSAT_ASSETS if platform.startswith("landsat") else SENTINEL_ASSETS
+        self.assets = {b: FakeAsset(f"{scene_id}/{b}") for b in names}
+
+
+# Surface reflectance by band role: dense vegetation and bare ground.
+VEGETATION = {"green": 0.05, "red": 0.04, "nir": 0.40, "swir": 0.15}
+
+BARE = {"green": 0.12, "red": 0.16, "nir": 0.20, "swir": 0.32}
+
+ROLE = {"B03": "green", "B04": "red", "B08": "nir", "B11": "swir",
+        "green": "green", "red": "red", "nir08": "nir", "swir16": "swir"}
+
+
+def _dn(reflectance, landsat):
+    """
+    Digital number for a reflectance: Landsat C2 L2 scaling, or
+    Sentinel-2 with the 1000 offset of baseline 05.11.
+    """
+
+    if landsat:
+        return int(round((reflectance + 0.2) / 0.0000275))
+
+    return int(round(reflectance * 10000 + 1000))
+
+
+class FakeImagery:
+    """
+    search(bbox, start, end, collection) and reader(href, grid) over
+    scenes defined as
+
+        {scene_id: {"day": date, "cloudy": bool, "cleared": bool | "all",
+                    "platform": "sentinel-2a" | "landsat-5" | ...,
+                    "covers": None | "west" | "east"}}
+
+    "cleared" scenes have bare ground in the north-west quarter of the
+    grid ("all": the whole grid) where the others have dense
+    vegetation. "covers" limits a tile to one half of the grid (the
+    rest is outside its footprint: no data).
+    """
+
+    def __init__(self, scenes):
+        self.scenes = scenes
+        self.reads = []
+        self.searches = []
+
+    def search(self, bbox, start, end, collection="sentinel-2-l2a"):
+        self.searches.append((start, end))
+        landsat = collection.startswith("landsat")
+        return [
+            FakeItem(sid, s["day"], platform=s.get("platform", "sentinel-2a"))
+            for sid, s in self.scenes.items()
+            if start <= s["day"] <= end
+            and s.get("platform", "sentinel-2a").startswith("landsat") == landsat
+        ]
+
+    def reader(self, href, grid):
+        scene_id, band = href.split("/")
+        self.reads.append(href)
+        scene = self.scenes[scene_id]
+        landsat = scene.get("platform", "sentinel-2a").startswith("landsat")
+        h, w = grid.height, grid.width
+
+        if band in ("SCL", "qa_pixel"):
+            if landsat:
+                # QA_PIXEL: bit 6 clear, bit 3 cloud; 1 = fill.
+                out = np.full((h, w), 8 if scene["cloudy"] else 64, dtype="uint16")
+            else:
+                out = np.full((h, w), 9 if scene["cloudy"] else 4, dtype="uint8")
+            nodata = 1 if landsat else 0
+        else:
+            role = ROLE[band]
+            out = np.full((h, w), _dn(VEGETATION[role], landsat), dtype="uint16")
+            if scene.get("cleared"):
+                bare = _dn(BARE[role], landsat)
+                if scene["cleared"] == "all":
+                    out[:, :] = bare
+                else:
+                    out[: h // 2, : w // 2] = bare
+            nodata = 0
+
+        covers = scene.get("covers")
+        if covers == "west":
+            out[:, w // 2:] = nodata
+        elif covers == "east":
+            out[:, : w // 2] = nodata
+
+        return out
+
+
+def clear_year(cleared=False):
+    """
+    Two clear scenes a year apart; the later one cleared if asked.
+    """
+
+    today = date.today()
+
+    return {
+        "before": {"day": today - timedelta(days=370), "cloudy": False},
+        "after": {"day": today - timedelta(days=5), "cloudy": False, "cleared": cleared},
+    }
+
+
+# ============================================================
 # FIXTURES
 # ============================================================
 
+@pytest.fixture(scope="session")
+def web_cache_dir(tmp_path_factory):
+    """
+    One temporary web-search cache for the whole test session (a
+    folder per test is slow on Windows).
+    """
+
+    return str(tmp_path_factory.mktemp("web"))
+
+
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch):
+def isolated_env(monkeypatch, web_cache_dir):
     """
     No login, no question limit, fresh rate-limit counters, and no
     real network providers, whatever the local .env says.
@@ -303,8 +448,17 @@ def isolated_env(monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_PER_IP", "0")
     monkeypatch.setenv("RATE_LIMIT_DAILY_TOTAL", "0")
 
+    # Never spend real web-search credits in tests.
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr(web_research, "CACHE_DIR", web_cache_dir)
+
     ratelimit._by_ip.clear()
     ratelimit._total.clear()
+
+    # Feedback goes to a throwaway SQLite file, never a real database.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("FEEDBACK_DB_PATH", os.path.join(web_cache_dir, f"feedback-{uuid.uuid4().hex}.sqlite3"))
+    feedback._by_ip.clear()
 
     def no_network(*args, **kwargs):
         raise AssertionError("test tried to reach a real provider")
@@ -316,6 +470,17 @@ def isolated_env(monkeypatch):
     monkeypatch.setattr(pipeline, "get_latest_satellite", lambda **kw: dict(FAKE_SCENE))
     monkeypatch.setattr(main, "get_latest_satellite", no_network)
     monkeypatch.setattr(main, "search_satellite", no_network)
+    monkeypatch.setattr(change_detection, "search_scenes", no_network)
+    monkeypatch.setattr(change_detection, "read_band", no_network)
+    monkeypatch.setattr(terrain, "search_tiles", no_network)
+    monkeypatch.setattr(terrain, "read_dem", no_network)
+    monkeypatch.setattr(flood, "search", no_network)
+    monkeypatch.setattr(flood, "read", no_network)
+    monkeypatch.setattr(flood, "climatology", no_network)
+    monkeypatch.setattr(landcover, "search_tiles", no_network)
+    monkeypatch.setattr(landcover, "read_classes", no_network)
+    monkeypatch.setattr(ml_buildings, "search_tiles", no_network)
+    monkeypatch.setattr(ml_buildings, "download", no_network)
 
     yield
 
@@ -366,5 +531,159 @@ def geocoder(monkeypatch):
         fake = FakeGeolocator(raw)
         monkeypatch.setattr(main, "geolocator", fake)
         return fake
+
+    return install
+
+
+@pytest.fixture
+def imagery(monkeypatch):
+    """
+    imagery(scenes) installs fake Sentinel-2 search and band reading.
+    """
+
+    def install(scenes):
+        fake = FakeImagery(scenes)
+        monkeypatch.setattr(change_detection, "search_scenes", fake.search)
+        monkeypatch.setattr(change_detection, "read_band", fake.reader)
+        return fake
+
+    return install
+
+
+class FakeDem:
+    """
+    One DEM tile: flat ground at `ground` metres, with an optional
+    square depression (`low_by` metres lower) around the search centre
+    within `radius_m`.
+    """
+
+    def __init__(self, ground=6.0, low_by=0.0, radius_m=100):
+        self.ground = ground
+        self.low_by = low_by
+        self.radius_m = radius_m
+        self.reads = 0
+
+    def search(self, bbox):
+        return [type("Tile", (), {"id": "Copernicus_DSM_TEST", "assets": {"data": FakeAsset("dem")}})()]
+
+    def reader(self, href, grid):
+        from rasterio.warp import transform as warp
+
+        self.reads += 1
+        out = np.full((grid.height, grid.width), self.ground, dtype="float32")
+        if self.low_by:
+            (x,), (y,) = warp("EPSG:4326", grid.crs, [LON], [LAT])
+            col = (x - grid.transform.c) / grid.pixel_m
+            row = (grid.transform.f - y) / grid.pixel_m
+            r = self.radius_m / grid.pixel_m
+            rows, cols = np.mgrid[0:grid.height, 0:grid.width]
+            out[(abs(rows - row) <= r) & (abs(cols - col) <= r)] -= self.low_by
+        return out
+
+
+@pytest.fixture
+def dem(monkeypatch):
+    """
+    dem(ground=..., low_by=...) installs a fake Copernicus DEM.
+    """
+
+    def install(**kwargs):
+        fake = FakeDem(**kwargs)
+        monkeypatch.setattr(terrain, "search_tiles", fake.search)
+        monkeypatch.setattr(terrain, "read_dem", fake.reader)
+        return fake
+
+    return install
+
+
+def flood_result(flooded_seasons=0, history_share=0.0, radar=True, history=True):
+    """
+    One site's flood.measure_sites result.
+    """
+
+    flooded = [
+        {"date": f"{2025 - k}-11-10", "season": f"Sep-Nov {2025 - k}", "share": 0.6}
+        for k in range(flooded_seasons)
+    ]
+
+    return {
+        "water_history": {"share": history_share, "mean_occurrence": history_share * 10}
+        if history else None,
+        "observed": {
+            "images": 8, "flooded_images": len(flooded),
+            "flooded_seasons": flooded_seasons,
+            "max_share": 0.6 if flooded else 0.0, "flooded": flooded,
+        } if radar else None,
+    }
+
+
+@pytest.fixture
+def flood_evidence(monkeypatch):
+    """
+    flood_evidence(default=..., by_site=fn) fakes flood.measure_sites:
+    every site gets `default`, or by_site(index) if given.
+    """
+
+    def install(default=None, by_site=None, problems=()):
+
+        default = default or flood_result()
+
+        def fake(sites, **kwargs):
+            results = [by_site(i) if by_site else default for i in range(len(sites))]
+            info = {"problems": list(problems),
+                    "seasons": {"wet_months": ["Sep", "Oct", "Nov"], "dry_months": ["Jan", "Feb", "Mar"],
+                                "chosen_by": "test"}}
+            if any(r["observed"] for r in results):
+                info["observed_flooding"] = {"source": flood.S1_SOURCE_ID, "wet_images": [],
+                                             "dry_images": [], "method": "test"}
+            if any(r["water_history"] for r in results):
+                info["water_history"] = {"source": flood.JRC_SOURCE_ID, "period": "1984-2020"}
+            return results, info
+
+        monkeypatch.setattr(flood, "measure_sites", fake)
+
+    return install
+
+
+@pytest.fixture
+def open_land(monkeypatch):
+    """
+    open_land(found=[...], problems=[...]) fakes landcover.discover:
+    found is a list of (dx_m, dy_m, side_m, land cover) squares.
+    Machine-learning building footprints are faked too: `footprints`
+    is a list of (dx_m, dy_m, side_m) squares.
+    """
+
+    def install(found=(), problems=(), footprints=()):
+
+        from shapely.geometry import Polygon
+
+        def fake_buildings(bbox, **kwargs):
+            shapes = [Polygon([(p["lon"], p["lat"]) for p in square(dx, dy, side)])
+                      for dx, dy, side in footprints]
+            return shapes, {"source": ml_buildings.SOURCE_ID, "tiles": ["test"]}
+
+        monkeypatch.setattr(ml_buildings, "buildings_in", fake_buildings)
+
+        def fake(area_geometry, context, existing, min_area_m2=0, max_area_m2=None, **kwargs):
+            candidates = []
+            for i, (dx, dy, side, cover) in enumerate(found, start=1):
+                shape = geodata._polygon(square(dx, dy, side), context.proj)
+                lon, lat = context.proj.to_lonlat(shape.centroid.x, shape.centroid.y)
+                candidates.append({
+                    "candidate_id": f"landcover-{i}", "latitude": lat, "longitude": lon,
+                    "area_m2": round(shape.area, 1), "site_type": f"untagged open land ({cover})",
+                    "site_kind": "open_land", "building_type": None, "landuse": None,
+                    "landcover": cover, "name": None,
+                    "discovered": {"source": landcover.SOURCE_ID, "land_cover_year": "2021",
+                                   "classes": {cover: 1.0}, "checked_on": "2026-09-26",
+                                   "note": "Found in the land-cover map, not tagged on OpenStreetMap."},
+                    "_sources": {"land_parcels": {"source_id": landcover.SOURCE_ID}},
+                    "_shape": shape,
+                })
+            return candidates, {"source": landcover.SOURCE_ID, "tiles": ["test"], "land_cover_year": "2021",
+                                "problems": list(problems), "patches_found": len(candidates)}
+
+        monkeypatch.setattr(landcover, "discover", fake)
 
     return install

@@ -12,7 +12,7 @@ from analysis_spec import AnalysisSpec
 from assessment import METHOD_TYPES, VERIFY, assess
 from geodata import collect_candidates_and_context, new_context
 from scoring import score_candidate
-from use_cases import EV_CHARGING, SOLAR_PROSPECTING, USE_CASES
+from use_cases import EV_CHARGING, LAND_ACQUISITION, SOLAR_PROSPECTING, USE_CASES
 
 from tests.conftest import (
     LAT,
@@ -87,10 +87,10 @@ def test_unavailable_layer_state():
     context.layer_status["land_parcels"] = "loaded"
 
     scored = _scored({"latitude": LAT, "longitude": LON, "area_m2": 900, "landuse": "vacant"},
-                     EV_CHARGING, context)
+                     LAND_ACQUISITION, context)
 
-    # No flood provider; roads has a provider but wasn't loaded.
-    assert scored["criteria"]["flood_risk"]["state"] == "data_unavailable"
+    # No zoning provider; roads has a provider but wasn't loaded.
+    assert scored["criteria"]["land_use_compatibility"]["state"] == "data_unavailable"
     assert scored["criteria"]["road_access"]["state"] == "data_not_loaded"
 
 
@@ -168,7 +168,8 @@ def test_unknown_items_explain_why(land):
 
     unknown = {u["id"]: u for u in result["unknown"]}
 
-    assert unknown["flood_risk"]["state"] == "data_unavailable"
+    # Flood exposure has a provider, but nothing was read in this test.
+    assert unknown["flood_risk"]["state"] == "data_not_loaded"
     assert unknown["flood_risk"]["reason"]
     assert unknown["ownership"]["state"] == "not_assessed"
     assert unknown["grid_connection_capacity"]["label"] == "Grid connection capacity"
@@ -186,7 +187,7 @@ def test_ev_verify_list(land):
 
     assert set(ids) == {
         "parcel_size_fit", "road_access", "vacancy", "flood_risk",
-        "ownership", "grid_connection_capacity", "zoning",
+        "ownership", "grid_connection_capacity", "zoning", "protected_status",
     }
 
     # Cheapest method types first.
@@ -248,7 +249,9 @@ def test_solar_verify_list():
 
 def test_verify_table_is_valid_and_has_no_dead_entries():
 
-    referenced = set()
+    from assessment import EXTRA
+
+    referenced = {extra_id for items in EXTRA.values() for extra_id, _ in items}
 
     for use_case in USE_CASES.values():
         referenced |= {c.id for c in use_case.criteria}
@@ -293,10 +296,17 @@ def test_analyze_attaches_assessment_to_ranked_candidates(client, deepseek, over
         assert [k["id"] for k in assessment["known"]] == measured
 
 
-def test_complete_run(client, deepseek, overpass):
+def test_complete_run(client, deepseek, overpass, imagery, dem, flood_evidence, open_land):
+
+    from tests.conftest import clear_year
+
+    open_land()
 
     deepseek(planner_reply("land_acquisition"))
     overpass(land_elements())
+    imagery(clear_year())
+    dem()
+    flood_evidence()
 
     body = client.post("/analyze", json={"query": "land in Adyar"}).json()
 
@@ -340,6 +350,7 @@ def test_completeness_partial_reasons():
     # Skipped layers in layer-id order, then the partial search.
     assert result["reasons"] == [
         "Not loaded for this analysis: Existing EV charging stations.",
+        "Not loaded for this analysis: Flood exposure (observed water and flooding).",
         "Not loaded for this analysis: Shops, offices and amenities.",
         "Not loaded for this analysis: Road network.",
         "Only part of Velachery was searched (4 of about 32 km²).",
@@ -355,10 +366,10 @@ def test_unavailable_layers_do_not_make_a_run_partial():
 
     context = new_context(LAT, LON, 1)
 
-    for layer in ("land_parcels", "roads", "points_of_interest", "ev_chargers"):
+    for layer in ("land_parcels", "roads", "flood_risk", "terrain"):
         context.layer_status[layer] = "loaded"
 
-    # flood_risk has no provider; that is missing data, not a failure.
-    assert pipeline._completeness(EV_CHARGING, area, context, "loaded") == {
+    # Zoning has no provider; that is missing data, not a failure.
+    assert pipeline._completeness(LAND_ACQUISITION, area, context, "loaded") == {
         "status": "complete", "reasons": [],
     }

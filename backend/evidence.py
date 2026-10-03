@@ -13,6 +13,8 @@ Statuses:
     observed               read directly from the source and not
                            verified (e.g. an OSM land-use tag)
     inferred               derived from several observations
+    reported               claimed by an outside source (e.g. a web
+                           page, see web_research.py), not verified
     not_measured           no evidence: the layer is unavailable or
                            the value could not be measured
     verification_required  remote evidence cannot settle it
@@ -33,6 +35,7 @@ Status = Literal[
     "measured",
     "observed",
     "inferred",
+    "reported",
     "not_measured",
     "verification_required",
 ]
@@ -89,6 +92,37 @@ _DISTANCE = "Shortest distance from the candidate outline, in a local metric pro
 _COUNT = "Count of mapped features within the stated distance of the candidate outline"
 
 _TAG = "Read from the OpenStreetMap tag; not verified on imagery or the ground"
+
+_INDEX = (
+    "Mean over the patch of a normalized-difference index from Sentinel-2 "
+    "surface reflectance (see the analysis method)"
+)
+
+_SCENE = "From the Sentinel-2 scene metadata"
+
+_SHARE = (
+    "Share of the site's cloud-free 10 m pixels whose spectral change "
+    "between the two Sentinel-2 images passed the thresholds"
+)
+
+_RADAR = (
+    "Sentinel-1 radar (VV) in the location's wettest months, compared with a "
+    "dry-season reference; misses floods between satellite passes"
+)
+
+_JRC = "JRC Global Surface Water occurrence (Landsat, 1984-2020)"
+
+_OSM_PROTECTED = (
+    "Overlap of the site outline with areas tagged on OpenStreetMap; the map "
+    "records only some protected areas"
+)
+
+_DEM = (
+    "Copernicus DEM GLO-30 surface model (includes trees and buildings; "
+    "about ±2 m relative accuracy; acquired 2011-2015)"
+)
+
+_CLOUD = "Pixels classed as clear ground in the scene classification layer"
 
 _ABSENT = (
     "None mapped within the search distance. Absence from the map "
@@ -166,6 +200,137 @@ MEASUREMENTS = {
     "distance_to_centre_m": (
         "Distance from the centre of the searched place", "m", "measured", _DISTANCE,
     ),
+
+    # Change (Sentinel-2)
+    "changed_area_m2": (
+        "Area of detected change", "m2", "measured",
+        "10 m pixels whose spectral index change passed the thresholds, x 100 m²",
+    ),
+    "index_before": (
+        "Mean spectral index in the earlier scene", "index", "measured", _INDEX,
+    ),
+    "index_after": (
+        "Mean spectral index in the later scene", "index", "measured", _INDEX,
+    ),
+    "index_delta": (
+        "Mean change in the spectral index", "index", "measured", _INDEX,
+    ),
+    "before_scene_date": (
+        "Acquisition date of the earlier scene", None, "observed", _SCENE,
+    ),
+    "after_scene_date": (
+        "Acquisition date of the later scene", None, "observed", _SCENE,
+    ),
+    "clear_fraction_before": (
+        "Share of the searched area clear of cloud in the earlier scene", "fraction",
+        "measured", _CLOUD,
+    ),
+    "clear_fraction_after": (
+        "Share of the searched area clear of cloud in the later scene", "fraction",
+        "measured", _CLOUD,
+    ),
+    # Recent change on a site (shares of its clear pixels)
+    "changed_share": (
+        "Share of the site that changed", "fraction", "measured", _SHARE,
+    ),
+    "built_or_bare_increase_share": (
+        "Share of the site where built-up or bare surface increased", "fraction",
+        "measured", _SHARE,
+    ),
+    "vegetation_loss_share": (
+        "Share of the site that lost vegetation", "fraction", "measured", _SHARE,
+    ),
+    "vegetation_gain_share": (
+        "Share of the site that gained vegetation", "fraction", "measured", _SHARE,
+    ),
+    "water_gain_share": (
+        "Share of the site where water appeared", "fraction", "measured", _SHARE,
+    ),
+    "water_loss_share": (
+        "Share of the site where water receded", "fraction", "measured", _SHARE,
+    ),
+    # Flood exposure (Sentinel-1, JRC)
+    "observed_flood_images": (
+        "Wet-season radar images showing standing water on the site", "count", "measured", _RADAR,
+    ),
+    "wet_season_images": (
+        "Wet-season radar images examined", "count", "measured", _RADAR,
+    ),
+    "observed_flood_seasons": (
+        "Wet seasons with standing water seen on the site", "count", "measured", _RADAR,
+    ),
+    "max_flooded_share": (
+        "Largest share of the site under standing water in one radar image", "fraction",
+        "measured", _RADAR,
+    ),
+    "water_history_share": (
+        "Share of the site ever seen as open water, 1984-2020", "fraction", "measured", _JRC,
+    ),
+    "water_occurrence_mean": (
+        "Mean water occurrence over the site, 1984-2020", "percent", "measured", _JRC,
+    ),
+
+    # Land cover and protection
+    "landcover_class": (
+        "Land cover in the ESA WorldCover map", None, "observed",
+        "Read from the ESA WorldCover land-cover map (2021); not verified on the ground",
+    ),
+    "protected_overlap_share": (
+        "Share of the site inside mapped protected areas or reserved forests", "fraction",
+        "measured", _OSM_PROTECTED,
+    ),
+    "in_use_overlap_share": (
+        "Share of the site inside land already in use (campus, school, park, place of worship...)",
+        "fraction", "measured", _OSM_PROTECTED,
+    ),
+    "building_cover_share": (
+        "Share of the site covered by mapped building footprints", "fraction", "measured",
+        "Overlap of the site with OpenStreetMap building footprints and Microsoft "
+        "machine-learning footprints (imagery 2014-2023); newer buildings are not counted",
+    ),
+    "wetland_overlap_share": (
+        "Share of the site inside mapped wetlands", "fraction", "measured", _OSM_PROTECTED,
+    ),
+
+    # Infrastructure (OpenStreetMap)
+    "nearest_station_m": (
+        "Distance to the nearest mapped rail or metro station (within 3 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_bus_station_m": (
+        "Distance to the nearest mapped bus station (within 2 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_trunk_road_m": (
+        "Distance to the nearest mapped motorway or trunk road (within 2 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_substation_m": (
+        "Distance to the nearest mapped power substation (within 3 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_airport_m": (
+        "Distance to the nearest mapped airport (within 25 km)", "m", "measured", _DISTANCE,
+    ),
+    "nearest_power_line_m": (
+        "Distance to the nearest mapped high-tension power line (within 500 m)", "m", "measured", _DISTANCE,
+    ),
+    "projects_within_5km": (
+        "Road, rail, power and development projects mapped as under construction or proposed within 5 km",
+        "count", "measured",
+        "Count of OpenStreetMap features tagged construction or proposed; dates and approvals unknown",
+    ),
+
+    # Terrain (Copernicus DEM)
+    "elevation_m": (
+        "Surface elevation above sea level (median over the site)", "m", "measured", _DEM,
+    ),
+    "relative_elevation_m": (
+        "Height of the site relative to the ground around it", "m", "measured", _DEM,
+    ),
+    "slope_pct": (
+        "Mean slope across the site", "percent", "measured", _DEM,
+    ),
+    "season_gap_days": (
+        "Difference in time of year between the two scenes", "days", "measured",
+        "Days between the scenes' positions in the calendar year",
+    ),
 }
 
 
@@ -175,14 +340,19 @@ MEASUREMENTS = {
 
 def _source_fields(layer_id, provenance):
 
-    source = data_registry.resolve(layer_id)
-
     provenance = provenance or {}
+
+    # A layer can be supplied by more than one source (historical
+    # imagery: Sentinel-2 or Landsat); provenance names the one used.
+    used = data_registry.SOURCES.get(provenance.get("source_id"))
+
+    source = used or data_registry.resolve(layer_id)
 
     return {
         "layer": layer_id,
-        "source": data_registry.source_label(layer_id),
+        "source": used.name if used else data_registry.source_label(layer_id),
         "source_id": source.id if source else None,
+        "observed_at": provenance.get("observed_at"),
         "data_as_of": provenance.get("data_as_of"),
         "retrieved_at": provenance.get("retrieved_at"),
     }

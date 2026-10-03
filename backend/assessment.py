@@ -72,10 +72,36 @@ VERIFY = {
         "Mapped outlines are not cadastral parcels.",
     ),
     "flood_risk": (
-        "Flood risk",
+        "Flood history and zoning",
         "Has the site flooded, or is it in an official flood zone?",
         "records_check",
-        "No flood risk data is connected.",
+        "Satellite passes miss floods that drain quickly, and official flood-zone maps were not checked.",
+    ),
+    # Only listed when water was recorded on the site (see EXTRA).
+    "water_body": (
+        "Water body status",
+        "Is the site a filled-in lake, tank or wetland, and is building on it permitted?",
+        "records_check",
+        "Open water was recorded on the site in past satellite images.",
+    ),
+    "protected_status": (
+        "Protected status and current use",
+        "Is the site in a protected forest, wetland, coastal regulation or eco-sensitive zone, "
+        "or part of an institution, park or other land already in use?",
+        "records_check",
+        "OpenStreetMap records only some protected areas and land uses; official records were not checked.",
+    ),
+    "power_line": (
+        "Power line clearance",
+        "Does a power-line right-of-way or clearance zone restrict building on the site?",
+        "records_check",
+        "A mapped high-tension power line crosses or runs next to the site.",
+    ),
+    "permits": (
+        "Permits",
+        "Is the change covered by building or land-use permits?",
+        "records_check",
+        "Permits are not assessed by SkyLens.",
     ),
     "grid_connection_capacity": (
         "Grid connection capacity",
@@ -84,7 +110,28 @@ VERIFY = {
         "Grid capacity is not assessed by SkyLens.",
     ),
 
+    # Only listed when the site changed (see CONDITIONAL).
+    "recent_change": (
+        "Recent change on site",
+        "What is on the site now: new construction, clearing or water?",
+        "field_visit",
+        "Recent satellite imagery shows change on the site.",
+    ),
+
+    "terrain": (
+        "Drainage",
+        "Does water collect on this site in heavy rain, and has it flooded before?",
+        "field_visit",
+        "The site is lower than the ground around it.",
+    ),
+
     # Imagery
+    "cause_of_change": (
+        "Cause of the change",
+        "What actually changed on the ground: construction, clearing, farming or flooding?",
+        "imagery_review",
+        "Spectral change at satellite resolution cannot tell these causes apart.",
+    ),
     "footprint_size": (
         "Usable roof area",
         "How much of the roof is usable for panels?",
@@ -143,6 +190,59 @@ VERIFY = {
         "site_survey",
         "No rooftop irradiance data is connected.",
     ),
+}
+
+
+def _site_changed(scored):
+
+    from criteria import ALERT_CHANGES
+    from change_detection import PARCEL_ALERT_SHARE
+
+    m = scored.get("measurements") or {}
+
+    return any((m.get(f"{t}_share") or 0) >= PARCEL_ALERT_SHARE for t in ALERT_CHANGES)
+
+
+def _low_lying(scored):
+
+    from terrain import LOW_LYING_M
+
+    relative = (scored.get("measurements") or {}).get("relative_elevation_m")
+
+    return relative is not None and relative <= -LOW_LYING_M
+
+
+# Verify items listed only when their condition holds for the site;
+# "why" is then the criterion's evidence summary.
+CONDITIONAL = {
+    "recent_change": _site_changed,
+    "terrain": _low_lying,
+}
+
+
+def _water_recorded(scored):
+
+    from criteria import WATER_HISTORY_MINOR
+
+    share = (scored.get("measurements") or {}).get("water_history_share")
+
+    return share is not None and share >= WATER_HISTORY_MINOR
+
+
+# Further verify items a measured criterion can raise:
+# criterion id -> [(verify id, condition)]; "why" is the evidence.
+def _power_line(scored):
+
+    from infrastructure import POWER_LINE_WARNING_M
+
+    distance = (scored.get("measurements") or {}).get("nearest_power_line_m")
+
+    return distance is not None and distance <= POWER_LINE_WARNING_M
+
+
+EXTRA = {
+    "flood_risk": [("water_body", _water_recorded)],
+    "infrastructure": [("power_line", _power_line)],
 }
 
 
@@ -211,9 +311,14 @@ def assess(scored, use_case):
                 "reason": entry["note"],
             })
 
-        if criterion_id in VERIFY:
+        condition = CONDITIONAL.get(criterion_id)
+
+        if criterion_id in VERIFY and (condition is None or (measured and condition(scored))):
 
             label, question, method_type, why = VERIFY[criterion_id]
+
+            if condition is not None:
+                why = entry.get("evidence")
 
             verify.append({
                 "id": criterion_id,
@@ -223,6 +328,21 @@ def assess(scored, use_case):
                 "method_type": method_type,
                 "status": "verification_required",
             })
+
+        for extra_id, extra_condition in EXTRA.get(criterion_id, ()):
+
+            if measured and extra_condition(scored):
+
+                label, question, method_type, _ = VERIFY[extra_id]
+
+                verify.append({
+                    "id": extra_id,
+                    "label": label,
+                    "question": question,
+                    "why": entry.get("evidence"),
+                    "method_type": method_type,
+                    "status": "verification_required",
+                })
 
     for item_id in use_case.unassessed:
 

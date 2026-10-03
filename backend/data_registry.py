@@ -74,6 +74,10 @@ class DataLayer:
     # the source, e.g. land-use tags rather than parcels.
     source_note: Optional[str] = None
 
+    # Further sources that can supply the layer; the one actually used
+    # is recorded in each result's provenance.
+    other_sources: tuple = ()
+
     limitations: tuple = ()
 
 
@@ -145,6 +149,240 @@ SENTINEL_2_PC = DataSource(
 )
 
 
+LANDSAT_PC = DataSource(
+
+    id="landsat_c2_l2_planetary_computer",
+
+    name="Microsoft Planetary Computer (Landsat)",
+
+    provider="USGS Landsat Collection 2 Level-2 (Landsat 5, 7, 8, 9), via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="30 m",
+
+    temporal_resolution="About 16-day revisit per satellite",
+
+    coverage="Global land, 1984 onwards",
+
+    freshness="Used for comparisons that reach back before 2017",
+
+    cost="free",
+
+    latency="A few seconds (catalogue search)",
+
+    license="USGS public domain",
+
+    limitations=(
+        "30 m pixels: changes under about 4,500 m² are not detected.",
+        "Landsat 7 images after May 2003 have permanent data gaps; used only when no other image is clear.",
+        "Small calibration differences between Landsat 5, 7, 8 and 9 sensors.",
+    ),
+)
+
+
+COPERNICUS_DEM_PC = DataSource(
+
+    id="copernicus_dem_glo30_planetary_computer",
+
+    name="Copernicus DEM (Microsoft Planetary Computer)",
+
+    provider="Copernicus DEM GLO-30 (ESA / Airbus, TanDEM-X), via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="30 m",
+
+    temporal_resolution="Single release; radar data acquired 2011-2015",
+
+    coverage="Global land",
+
+    freshness="Static: earthworks and landfill after 2015 do not appear",
+
+    cost="free",
+
+    latency="A few seconds per area",
+
+    license="Copernicus DEM licence (free use with attribution)",
+
+    limitations=(
+        "Surface model: includes buildings and trees, so on built-up land it measures roofs.",
+        "About ±2 m relative and ±4 m absolute vertical accuracy.",
+        "Terrain, not flood risk: it shows where ground is low, not how often it floods.",
+    ),
+)
+
+
+SENTINEL_1_PC = DataSource(
+
+    id="sentinel_1_rtc_planetary_computer",
+
+    name="Sentinel-1 radar (Microsoft Planetary Computer)",
+
+    provider="ESA Copernicus Sentinel-1 RTC (radiometrically terrain corrected), via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="10 m",
+
+    temporal_resolution="About 12 days (one satellite since 2022)",
+
+    coverage="Global land; gaps in some months",
+
+    freshness="Wet seasons of the last three years and the current one",
+
+    cost="free",
+
+    latency="Seconds per image; large remote files",
+
+    license="Copernicus Sentinel data terms",
+
+    limitations=(
+        "Floods that drain between satellite passes are missed.",
+        "Water among buildings is under-detected (radar double bounce).",
+        "Some months have no images (e.g. December 2023 over Chennai).",
+    ),
+)
+
+
+JRC_GSW_PC = DataSource(
+
+    id="jrc_gsw_planetary_computer",
+
+    name="JRC Global Surface Water (Microsoft Planetary Computer)",
+
+    provider="EC Joint Research Centre Global Surface Water v1.3, via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="30 m",
+
+    temporal_resolution="Summary of 1984-2020",
+
+    coverage="Global",
+
+    freshness="Ends in 2020",
+
+    cost="free",
+
+    license="Copernicus programme, free use with attribution",
+
+    latency="A few seconds",
+
+    limitations=(
+        "Built from optical Landsat images: most short floods are not captured.",
+        "Ends in 2020.",
+    ),
+)
+
+
+NASA_POWER = DataSource(
+
+    id="nasa_power_climatology",
+
+    name="NASA POWER rainfall climatology",
+
+    provider="NASA Prediction Of Worldwide Energy Resources, monthly climatology API",
+
+    spatial_resolution="About 0.5 degree",
+
+    temporal_resolution="Long-term monthly means",
+
+    coverage="Global",
+
+    freshness="Climatology (long-term averages)",
+
+    cost="free",
+
+    latency="About 2 seconds; cached per location",
+
+    license="NASA open data",
+
+    limitations=(
+        "Used only to choose each location's wet and dry months.",
+    ),
+)
+
+
+ESA_WORLDCOVER_PC = DataSource(
+
+    id="esa_worldcover_planetary_computer",
+
+    name="ESA WorldCover (Microsoft Planetary Computer)",
+
+    provider="ESA WorldCover 10 m land-cover map, via Microsoft Planetary Computer STAC",
+
+    spatial_resolution="10 m",
+
+    temporal_resolution="Annual maps (2020, 2021)",
+
+    coverage="Global",
+
+    freshness="2021: land built on or cleared since then is checked against current Sentinel-2",
+
+    cost="free",
+
+    latency="A few seconds",
+
+    license="CC BY 4.0",
+
+    limitations=(
+        "Land cover from 2021, about 75% accurate per class globally.",
+        "Bare ground and built-up surfaces look alike at 10 m.",
+    ),
+)
+
+
+MS_BUILDINGS_PC = DataSource(
+
+    id="ms_buildings_planetary_computer",
+
+    name="Microsoft building footprints (Microsoft Planetary Computer)",
+
+    provider="Microsoft Global ML Building Footprints (from Bing Maps imagery), via Microsoft Planetary Computer",
+
+    spatial_resolution="Individual building outlines",
+
+    temporal_resolution="Releases from imagery 2014-2023",
+
+    coverage="Global, including India",
+
+    freshness="Buildings visible in imagery up to 2023",
+
+    cost="free",
+
+    latency="About 30 s for the first question in a region, then about 1 s (local cache)",
+
+    license="ODbL",
+
+    limitations=(
+        "Detected by machine learning: some buildings are missed or misshapen.",
+        "Buildings built after the imagery (2014-2023) are not included.",
+    ),
+)
+
+
+TAVILY = DataSource(
+
+    id="tavily_web_search",
+
+    name="Tavily web search",
+
+    provider="Tavily search API (configured with TAVILY_API_KEY; see web_research.py)",
+
+    spatial_resolution="Place names only",
+
+    temporal_resolution="Whatever the pages report",
+
+    coverage="Public web pages and news",
+
+    freshness="Searches cached for 24 hours",
+
+    cost="metered",
+
+    latency="A few seconds per search; 3 searches per request",
+
+    license="Each page's own terms; quoted briefly with a link",
+
+    limitations=(
+        "Reported claims, not measurements: never scored or verified by SkyLens.",
+        "Used only when the user asks; only the place name and topic are sent.",
+    ),
+)
+
+
 SOURCES = {
 
     source.id: source
@@ -152,6 +390,14 @@ SOURCES = {
     for source in (
         OSM_OVERPASS,
         SENTINEL_2_PC,
+        LANDSAT_PC,
+        COPERNICUS_DEM_PC,
+        SENTINEL_1_PC,
+        JRC_GSW_PC,
+        NASA_POWER,
+        ESA_WORLDCOVER_PC,
+        MS_BUILDINGS_PC,
+        TAVILY,
     )
 }
 
@@ -176,6 +422,8 @@ _LAYERS = (
         id="building_footprints",
         label="Building footprints",
         source="osm_overpass",
+        # Machine-learning footprints fill gaps in OSM for land analyses.
+        other_sources=("ms_buildings_planetary_computer",),
         capabilities=("building_detection", "land_area"),
         limitations=(
             "Footprint area is not usable roof area.",
@@ -238,8 +486,14 @@ _LAYERS = (
 
     DataLayer(
         id="flood_risk",
-        label="Flood risk",
+        label="Flood exposure (observed water and flooding)",
+        source="sentinel_1_rtc_planetary_computer",
+        other_sources=("jrc_gsw_planetary_computer", "nasa_power_climatology"),
         capabilities=("flood_exposure",),
+        limitations=(
+            "Observed exposure, not a flood probability or an official flood-zone map.",
+            "Floods between satellite passes, and before 1984, are missed.",
+        ),
     ),
 
     DataLayer(
@@ -275,13 +529,84 @@ _LAYERS = (
     DataLayer(
         id="historical_imagery",
         label="Historical imagery comparison",
-        capabilities=("historical_change",),
+        source="sentinel_2_planetary_computer",
+        other_sources=("landsat_c2_l2_planetary_computer",),
+        capabilities=(
+            "historical_change",
+            "vegetation_change",
+            "construction_change",
+            "water_change",
+        ),
+        limitations=(
+            "Two-date spectral comparison: Sentinel-2 at 10 m (2017 onwards) or, for "
+            "earlier periods, Landsat at 30 m (1984 onwards).",
+            "Changes under about 500 m² (Sentinel-2) or 4,500 m² (Landsat) are not detected.",
+            "Shows that a surface changed, not why: construction, clearing, farming and flooding can look alike.",
+        ),
     ),
 
     DataLayer(
         id="site_registry",
         label="Customer's registered sites",
         capabilities=("customer_sites",),
+    ),
+
+    DataLayer(
+        id="terrain",
+        label="Elevation and terrain",
+        source="copernicus_dem_glo30_planetary_computer",
+        capabilities=("terrain", "elevation", "slope", "low_lying_land"),
+        limitations=(
+            "Not measurable on buildings: the surface model measures roofs.",
+            "Differences under about 2 m are within the model's accuracy.",
+            "Low-lying is not flood risk; drainage and flood history need verification.",
+        ),
+    ),
+
+    DataLayer(
+        id="land_cover",
+        label="Open land found in imagery",
+        source="esa_worldcover_planetary_computer",
+        other_sources=("sentinel_2_planetary_computer",),
+        capabilities=("land_cover", "open_land_discovery"),
+        limitations=(
+            "Not cadastral parcels: patches of open land, split at mapped roads.",
+            "Land cover is from 2021 and unverified on the ground.",
+        ),
+    ),
+
+    DataLayer(
+        id="infrastructure",
+        label="Infrastructure and projects",
+        source="osm_overpass",
+        capabilities=("infrastructure_proximity", "planned_infrastructure", "power_lines"),
+        limitations=(
+            "Projects are only what is tagged under construction or proposed on OpenStreetMap; "
+            "completion dates, funding and approvals are unknown.",
+            "Power line positions on the map can be off by several metres.",
+        ),
+    ),
+
+    DataLayer(
+        id="land_in_use",
+        label="Land already in use (campuses, schools, parks...)",
+        source="osm_overpass",
+        capabilities=("land_in_use",),
+        limitations=(
+            "Only what is mapped on OpenStreetMap; residential, commercial and industrial "
+            "zones are not treated as in use, since they include empty plots.",
+        ),
+    ),
+
+    DataLayer(
+        id="protected_areas",
+        label="Protected areas, reserved forests and wetlands",
+        source="osm_overpass",
+        capabilities=("protected_status",),
+        limitations=(
+            "Only what is tagged on OpenStreetMap; official forest, wetland, coastal "
+            "regulation and eco-sensitive zone records were not checked.",
+        ),
     ),
 )
 
@@ -399,6 +724,10 @@ def describe_layer(layer_id):
         "capabilities": list(layer.capabilities),
         "limitations": list(layer.limitations),
         "source": describe_source(source) if source else None,
+        "other_sources": [
+            describe_source(SOURCES[s]) for s in layer.other_sources
+            if SOURCES[s].available
+        ],
     }
 
 

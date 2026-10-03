@@ -6,11 +6,39 @@ AnalysisSpec + UseCase
     -> deterministic scoring -> ranking -> decision -> report
 """
 
+import re
+
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timezone
+
 from fastapi import HTTPException
+
+from shapely.ops import transform as reproject
 
 import data_registry
 
 from assessment import assess
+
+import change_detection
+
+import terrain
+
+import flood
+
+import landcover
+
+import ml_buildings
+
+import infrastructure
+
+# Candidates are not ranked when at least this much of them is inside
+# a protected area, inside land already in use, or (open land only)
+# covered by mapped buildings.
+PROTECTED_DROP_SHARE = 0.95
+
+IN_USE_DROP_SHARE = 0.5
+
+BUILT_DROP_SHARE = 0.2
 
 from buildings import get_buildings_with_provenance
 
@@ -155,9 +183,48 @@ def area_too_large_response(query, intent, spec, use_case, error):
     }
 
 
+def data_unavailable_response(query, intent, spec, use_case, area, error):
+
+    return {
+
+        "status": "data_unavailable",
+
+        "query": query,
+
+        "intent": intent,
+
+        "analysis_spec": spec.model_dump(),
+
+        "use_case": describe_use_case(use_case),
+
+        "message": (
+            "SkyLens could not find clear enough satellite imagery to "
+            "compare for this place and period, so no change has been "
+            "measured. " + error.reason
+        ),
+
+        "suggestions": [
+            "Try a different period: monsoon months are often cloudy.",
+            "Ask about a longer period, e.g. \"since 2023\".",
+        ],
+
+        "search_area": area.public(),
+
+        "scenes_checked": error.tried,
+    }
+
+
 # ============================================================
 # HELPERS
 # ============================================================
+
+def candidate_key(candidate):
+    """
+    Identity of a candidate: its id, or its OSM type and id.
+    """
+
+    return candidate.get("candidate_id") or (candidate.get("osm_type"), candidate.get("osm_id"))
+
 
 def area_filter(spec, use_case):
     """
@@ -210,10 +277,177 @@ def _satellite(latitude, longitude, radius_km):
     return satellite, "loaded"
 
 
-def _candidates(use_case, area, minimum, maximum, place):
+def _add_ml_buildings(area, context):
+    """
+    Add machine-learning building footprints (ml_buildings.py) to the
+    mapped buildings, for buildings OpenStreetMap does not have.
+    Problems never stop the analysis; they are reported.
+    """
+
+    from shapely.geometry import shape as to_shape
+
+    print("\nSTEP 5a: Reading machine-learning building footprints...")
+
+    try:
+
+        west, south, east, north = to_shape(area.geometry).bounds
+
+        m = 0.001
+
+        found, info = ml_buildings.buildings_in((west - m, south - m, east + m, north + m))
+
+    except Exception as e:
+
+        print("ML BUILDINGS FAILED:", repr(e))
+
+        context.meta["ml_buildings_problem"] = (
+            "Machine-learning building footprints could not be read "
+            f"({type(e).__name__}: {e}); only buildings mapped on OpenStreetMap were used."
+        )
+
+        return
+
+    proj = context.proj
+
+    if found:
+
+        import numpy as np
+        import shapely
+
+        # Tens of thousands of outlines: convert all coordinates at once.
+        shapes = np.array(found, dtype=object)
+
+        lonlat = shapely.get_coordinates(shapes)
+
+        x, y = proj.to_xy(lonlat[:, 0], lonlat[:, 1])
+
+        context.buildings += list(shapely.set_coordinates(shapes.copy(), np.column_stack([x, y])))
+
+    context.meta.pop("_building_index", None)
+
+    context.meta["ml_buildings"] = {**info, "count": len(found)}
+
+    print("STEP 5a: added", len(found), "footprints")
+
+
+def _discover_open_land(area, context, osm_candidates, minimum, maximum):
+    """
+    Open land found in imagery (landcover.discover), added to the OSM
+    candidates. Problems never stop the analysis: they are reported in
+    completeness and the OSM candidates are still ranked.
+    """
+
+    from shapely.geometry import shape as to_shape
+
+    print("\nSTEP 5a: Finding open land in imagery...")
+
+    try:
+
+        found, info = landcover.discover(
+            to_shape(area.geometry), context,
+            [c["_shape"] for c in osm_candidates], minimum, maximum,
+        )
+
+    except Exception as e:
+
+        print("OPEN LAND DISCOVERY FAILED:", repr(e))
+
+        context.meta["land_cover_problem"] = (
+            f"Open land could not be looked for in imagery ({type(e).__name__}: {e}); "
+            "only land tagged on OpenStreetMap was considered."
+        )
+
+        return []
+
+    context.layer_status["land_cover"] = "loaded"
+
+    context.layer_provenance["land_cover"] = {
+        "source_id": info["source"], "observed_at": None, "data_as_of": info["land_cover_year"],
+        "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+    context.meta["land_cover"] = info
+
+    if info["problems"]:
+        context.meta["land_cover_problem"] = " ".join(info["problems"])
+
+    print("STEP 5a COMPLETE:", len(found), "patches added")
+
+    return found
+
+
+# Words in a question that ask for land rather than any site.
+_LAND_WORDS = re.compile(r"\b(land|plot|plots|vacant|empty site|empty sites|open site)\b", re.I)
+
+
+def wants_land(spec):
+    """
+    True when the question asked for land: the planner marked it
+    vacant, or the customer said land / plot / vacant.
+    """
+
+    return bool(
+        spec.requirements.get("vacant") is True
+        or _LAND_WORDS.search(spec.query or "")
+    )
+
+
+def _share_inside(shape, zones):
+
+    from shapely.ops import unary_union
+
+    hits = [z for z in zones if shape.intersects(z)]
+
+    if not hits:
+        return 0.0
+
+    if not shape.area:
+        return 1.0 if any(z.contains(shape) for z in hits) else 0.0
+
+    return unary_union([shape.intersection(z) for z in hits]).area / shape.area
+
+
+def _drop_unavailable(candidates, context):
+    """
+    (kept, dropped by reason). Not ranked: candidates at least
+    PROTECTED_DROP_SHARE inside a protected area or reserved forest,
+    IN_USE_DROP_SHARE inside land already in use, or open land at
+    least BUILT_DROP_SHARE covered by mapped buildings.
+    """
+
+    from geodata import building_cover
+
+    protected = [z.shape for z in context.protected if z.kind != "wetland"]
+
+    in_use = [p.shape for p in context.in_use]
+
+    kept = []
+
+    dropped = {"protected": [], "in_use": [], "built": []}
+
+    for candidate in candidates:
+
+        shape = context.shape_of(candidate)
+
+        if protected and _share_inside(shape, protected) >= PROTECTED_DROP_SHARE:
+            dropped["protected"].append(candidate)
+        elif in_use and _share_inside(shape, in_use) >= IN_USE_DROP_SHARE:
+            dropped["in_use"].append(candidate)
+        elif (candidate.get("site_kind") == "open_land" and context.buildings
+              and building_cover(context, shape) >= BUILT_DROP_SHARE):
+            dropped["built"].append(candidate)
+        else:
+            kept.append(candidate)
+
+    return kept, dropped
+
+
+def _candidates(use_case, spec, area, minimum, maximum, place):
     """
     Candidates plus the scoring context. For land and sites the
-    context layers come from the same Overpass request.
+    context layers come from the same Overpass request; for changes
+    the candidates are patches found by comparing satellite scenes.
+    Raises ChangeDataUnavailable when no clear imagery exists.
     """
 
     print(
@@ -223,7 +457,7 @@ def _candidates(use_case, area, minimum, maximum, place):
 
     source = use_case.candidate_source
 
-    stage = "building_data" if source == "buildings" else "candidate_data"
+    stage = {"buildings": "building_data", "changes": "imagery_data"}.get(source, "candidate_data")
 
     try:
 
@@ -250,6 +484,12 @@ def _candidates(use_case, area, minimum, maximum, place):
 
             context.layer_provenance["building_footprints"] = provenance
 
+        elif source == "changes":
+
+            candidates, context = change_detection.collect_changes(
+                area, spec, place, min_area_m2=minimum,
+            )
+
         else:
 
             layers = {
@@ -258,11 +498,26 @@ def _candidates(use_case, area, minimum, maximum, place):
                 if c.evaluator and c.data_layer in CONTEXT_LAYERS
             }
 
-            print("Context layers requested:", sorted(layers))
+            if use_case.discover_open_land:
+                # Needed to tell open land from built or in-use land.
+                layers |= {"building_footprints", "land_in_use", "protected_areas"}
+
+            land_only = source == "sites" and wants_land(spec)
+
+            print("Context layers requested:", sorted(layers), "land only:", land_only)
 
             candidates, context = collect_candidates_and_context(
-                source, area, minimum, maximum, layers, place
+                source, area, minimum, maximum, layers, place, land_only=land_only,
             )
+
+            context.meta["land_only"] = land_only
+
+            if use_case.discover_open_land:
+                _add_ml_buildings(area, context)
+                candidates += _discover_open_land(area, context, candidates, minimum, maximum)
+
+    except change_detection.ChangeDataUnavailable:
+        raise
 
     except Exception as e:
 
@@ -321,6 +576,334 @@ def _evidence(use_case, context, satellite_status):
     return evidence
 
 
+def _recent_change(use_case, spec, context, top, originals, emit):
+    """
+    For use cases with a recent_change criterion: compare satellite
+    images over the shortlisted sites only (one read for all) and
+    attach each site's measurement to its candidate. Imagery problems
+    never stop the analysis; they are reported in completeness.
+
+    Returns True if the measurement was attached.
+    """
+
+    if not top or not any(c.evaluator == "recent_change" for c in use_case.criteria):
+        return False
+
+    print("\nSTEP 6b: Checking recent change on the shortlist...")
+
+    proj = context.proj
+
+    shortlist = [originals[candidate_key(c)] for c in top]
+
+    geometries = [
+        reproject(lambda x, y, z=None: proj.to_lonlat(x, y), context.shape_of(c))
+        for c in shortlist
+    ]
+
+    time_range = spec.time_range
+
+    try:
+
+        parcels, scenes = change_detection.measure_parcels(
+            geometries,
+            before_date=date.fromisoformat(time_range.start) if time_range.start else None,
+            after_date=date.fromisoformat(time_range.end) if time_range.end else None,
+            match_season=time_range.start_precision == "year",
+        )
+
+    except change_detection.ChangeDataUnavailable as e:
+
+        print("RECENT CHANGE: no clear imagery:", e.reason)
+
+        context.meta["recent_change_problem"] = (
+            f"Recent change on the shortlisted sites could not be checked: {e.reason}"
+        )
+
+        emit("layer", {"id": "historical_imagery", "status": "failed"})
+
+        return False
+
+    except Exception as e:
+
+        print("RECENT CHANGE FAILED:", repr(e))
+
+        context.meta["recent_change_problem"] = (
+            "Recent change on the shortlisted sites could not be checked "
+            f"({type(e).__name__}: {e})."
+        )
+
+        emit("layer", {"id": "historical_imagery", "status": "failed"})
+
+        return False
+
+    for candidate, parcel in zip(shortlist, parcels):
+        candidate["recent_change"] = parcel
+
+    context.layer_status["historical_imagery"] = "loaded"
+
+    context.layer_provenance["historical_imagery"] = {
+        "source_id": scenes["source"],
+        "observed_at": scenes["after"]["acquired_at"],
+        "data_as_of": None,
+        "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+    context.meta["recent_change"] = scenes
+
+    emit("layer", {"id": "historical_imagery", "status": "used"})
+
+    print("STEP 6b COMPLETE")
+
+    return True
+
+
+def _environment(use_case, context, candidates, emit):
+    """
+    For use cases with terrain or flood-exposure criteria: measure
+    every candidate before scoring (flood exposure is scored, so sites
+    outside the shortlist must not rank without it). One read per
+    source for the whole set. Problems never stop the analysis; they
+    are reported in completeness.
+    """
+
+    evaluators = {c.evaluator for c in use_case.criteria}
+
+    wants_terrain = "terrain" in evaluators or "flood_exposure" in evaluators
+
+    wants_flood = "flood_exposure" in evaluators
+
+    if not (wants_terrain or wants_flood):
+        return
+
+    if not candidates:
+        # Nothing to measure: these layers are not missing.
+        for layer, wanted in (("terrain", wants_terrain), ("flood_risk", wants_flood)):
+            if wanted:
+                context.layer_status[layer] = "not_needed"
+        return
+
+    print("\nSTEP 5b: Measuring terrain and flood exposure...")
+
+    proj = context.proj
+
+    to_lonlat = lambda shape: reproject(lambda x, y, z=None: proj.to_lonlat(x, y), shape)
+
+    shapes = [context.shape_of(c) for c in candidates]
+
+    retrieved = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    jobs = ThreadPoolExecutor(max_workers=2)
+
+    terrain_job = jobs.submit(terrain.measure_sites, [
+        (to_lonlat(shape), to_lonlat(shape.buffer(terrain.RING_M)), c.get("site_kind") == "building")
+        for c, shape in zip(candidates, shapes)
+    ]) if wants_terrain else None
+
+    flood_job = jobs.submit(
+        flood.measure_sites, [to_lonlat(shape) for shape in shapes],
+        area_center=(context.proj.lat0, context.proj.lon0),
+    ) if wants_flood else None
+
+    jobs.shutdown(wait=False)
+
+    if terrain_job is not None:
+
+        try:
+
+            results, info = terrain_job.result()
+
+            for candidate, result in zip(candidates, results):
+                candidate["terrain"] = result
+
+            context.layer_status["terrain"] = "loaded"
+
+            context.layer_provenance["terrain"] = {
+                "source_id": info["source"], "observed_at": None,
+                "data_as_of": None, "retrieved_at": retrieved,
+            }
+
+            context.meta["terrain"] = info
+
+            emit("layer", {"id": "terrain", "status": "used"})
+
+        except Exception as e:
+
+            print("TERRAIN FAILED:", repr(e))
+
+            context.meta["terrain_problem"] = (
+                f"Terrain could not be measured ({type(e).__name__}: {e})."
+            )
+
+            emit("layer", {"id": "terrain", "status": "failed"})
+
+    if flood_job is not None:
+
+        try:
+
+            results, info = flood_job.result()
+
+            radar = "observed_flooding" in info
+
+            if not radar and "water_history" not in info:
+                raise RuntimeError("; ".join(info["problems"]) or "no flood evidence")
+
+            for candidate, result in zip(candidates, results):
+                candidate["flood"] = result
+
+            context.layer_status["flood_risk"] = "loaded"
+
+            context.layer_provenance["flood_risk"] = {
+                "source_id": flood.S1_SOURCE_ID if radar else flood.JRC_SOURCE_ID,
+                "observed_at": None, "data_as_of": None, "retrieved_at": retrieved,
+            }
+
+            context.meta["flood"] = info
+
+            if info["problems"]:
+                context.meta["flood_problem"] = " ".join(info["problems"])
+
+            emit("layer", {"id": "flood_risk", "status": "used"})
+
+        except Exception as e:
+
+            print("FLOOD EXPOSURE FAILED:", repr(e))
+
+            context.meta["flood_problem"] = (
+                f"Flood exposure could not be measured ({type(e).__name__}: {e})."
+            )
+
+            emit("layer", {"id": "flood_risk", "status": "failed"})
+
+    print("STEP 5b COMPLETE")
+
+
+def _area_metric(area, proj):
+
+    from shapely.geometry import shape as to_shape
+
+    return reproject(lambda x, y, z=None: proj.to_xy(x, y), to_shape(area.geometry))
+
+
+def _infrastructure(use_case, area, context, emit):
+    """
+    For use cases with an infrastructure criterion: read mapped
+    infrastructure and projects around the area (one Overpass request)
+    and keep the area summary for the report.
+    """
+
+    if not any(c.evaluator == "infrastructure_access" for c in use_case.criteria):
+        return
+
+    print("\nSTEP 5c: Reading infrastructure...")
+
+    try:
+        features = infrastructure.collect(area, context.proj)
+    except Exception as e:
+        print("INFRASTRUCTURE FAILED:", repr(e))
+        context.meta["infrastructure_problem"] = (
+            f"Infrastructure could not be read ({type(e).__name__}: {e})."
+        )
+        emit("layer", {"id": "infrastructure", "status": "failed"})
+        return
+
+    context.meta["infrastructure_features"] = features
+
+    context.meta["infrastructure"] = infrastructure.summary(features, _area_metric(area, context.proj), context.proj)
+
+    context.layer_status["infrastructure"] = "loaded"
+
+    emit("layer", {"id": "infrastructure", "status": "used"})
+
+
+def infrastructure_report(query, intent, spec, use_case, area, satellite, satellite_status, step, emit):
+    """
+    The "what infrastructure is coming near X?" answer: an area report,
+    no candidates and no scores.
+    """
+
+    from geodata import LocalProjection
+
+    step("candidates", "running")
+
+    proj = LocalProjection(area.latitude, area.longitude)
+
+    try:
+        features = infrastructure.collect(area, proj)
+    except Exception as e:
+        print("INFRASTRUCTURE FAILED:", repr(e))
+        raise HTTPException(status_code=502, detail={
+            "stage": "candidate_data", "error_type": type(e).__name__, "error": str(e),
+        })
+
+    report = infrastructure.summary(features, _area_metric(area, proj), proj)
+
+    emit("layer", {"id": "infrastructure", "status": "used"})
+
+    building = report["under_construction"]
+
+    proposed = report["proposed"]
+
+    step("candidates", "done", count=len(building) + len(proposed))
+
+    step("scoring", "done", ranked=0)
+
+    place = area.name
+
+    if building or proposed:
+        projects = sorted(building + proposed, key=lambda p: p["distance_m"])
+        # Name the nearest transport or utility project when there is one:
+        # it is what "what infrastructure is coming?" asks about.
+        works = [p for p in projects if p["kind"] != "development"]
+        nearest = (works or projects)[0]
+        summary = (
+            f"{len(building)} project(s) mapped as under construction and {len(proposed)} as "
+            f"proposed within 5 km of {place}. Nearest {'transport or utility project' if works else 'project'}: "
+            f"{nearest['name'] or nearest['label']} ({nearest['label'].lower()}, {nearest['distance_m']:,} m)."
+        )
+    else:
+        summary = f"No projects are mapped as under construction or proposed within 5 km of {place}."
+
+    step("decision", "done")
+
+    limitations = [f"Searched {area.description}."] + list(use_case.limitations)
+
+    completeness = {"status": "complete" if satellite_status == "loaded" else "partial",
+                    "reasons": [] if satellite_status == "loaded" else
+                    [f"Satellite imagery could not be retrieved ({satellite_status.removeprefix('failed: ')})."]}
+
+    return {
+        "status": "success",
+        "query": query,
+        "intent": intent,
+        "analysis_spec": spec.model_dump(),
+        "use_case": describe_use_case(use_case),
+        "resolved_location": {"name": area.address, "latitude": area.latitude, "longitude": area.longitude},
+        "search_area": area.public(),
+        "satellite": satellite,
+        "evidence": [
+            {"id": "infrastructure", "label": data_registry.layer_label("infrastructure"),
+             "source": data_registry.source_label("infrastructure"), "status": "used"},
+        ],
+        "analysis": {
+            "candidate_type": use_case.candidate_type,
+            "total_candidates": 0,
+            "shortlisted": 0,
+            "evidence_coverage": 1.0,
+        },
+        "infrastructure": report,
+        "top_prospects": [],
+        "decision": {
+            "summary": summary,
+            "recommended_action": use_case.recommended_action,
+            "confidence": "medium",
+        },
+        "confidence": "medium",
+        "missing_data": [],
+        "limitations": limitations,
+        "completeness": completeness,
+    }
+
+
 def _completeness(use_case, area, context, satellite_status):
     """
     Whether the analysis ran everything it planned with the providers
@@ -339,14 +922,21 @@ def _completeness(use_case, area, context, satellite_status):
         c.data_layer
         for c in use_case.criteria
         if c.evaluator
+        and c.weight > 0
         and data_registry.is_available(c.data_layer)
         and not context.has_layer(c.data_layer)
+        and context.layer_status.get(c.data_layer) != "not_needed"
     })
 
     for layer in skipped:
         reasons.append(
             f"Not loaded for this analysis: {data_registry.layer_label(layer)}."
         )
+
+    for problem in ("ml_buildings_problem", "land_cover_problem", "infrastructure_problem",
+                    "recent_change_problem", "terrain_problem", "flood_problem"):
+        if context.meta.get(problem):
+            reasons.append(context.meta[problem])
 
     if area.place_area_km2:
         reasons.append(
@@ -360,7 +950,40 @@ def _completeness(use_case, area, context, satellite_status):
     }
 
 
-def _decision(use_case, scored, top):
+def _change_decision(use_case, scored, top, context):
+
+    meta = context.meta["change_detection"]
+
+    period = f"between {meta['before']['date']} and {meta['after']['date']}"
+
+    if not scored:
+        return {
+            "summary": (
+                f"No change above the detection thresholds was found {period}. "
+                "This does not rule out changes smaller than about 500 m²."
+            ),
+            "recommended_action": (
+                "Try a longer period, or check smaller sites on "
+                "high-resolution imagery."
+            ),
+            "confidence": "low",
+        }
+
+    return {
+        "summary": (
+            f"Found {len(scored)} changed areas {period}. The top {len(top)} "
+            f"are ranked by how strong and how large the change is, and "
+            f"how comparable the two images are."
+        ),
+        "recommended_action": use_case.recommended_action,
+        "confidence": top[0]["confidence"],
+    }
+
+
+def _decision(use_case, scored, top, context=None):
+
+    if use_case.candidate_source == "changes":
+        return _change_decision(use_case, scored, top, context)
 
     noun = use_case.candidate_noun
 
@@ -469,13 +1092,20 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         "status": "used" if satellite else "failed",
     })
 
+    if use_case.candidate_source == "infrastructure":
+        return infrastructure_report(query, intent, spec, use_case, area, satellite, satellite_status, step, emit)
+
     minimum, maximum = area_filter(spec, use_case)
 
     print("Minimum area:", minimum, "Maximum area:", maximum)
 
     place = spec.location.split(",")[0].strip()
 
-    candidates, context = _candidates(use_case, area, minimum, maximum, place)
+    try:
+        candidates, context = _candidates(use_case, spec, area, minimum, maximum, place)
+    except change_detection.ChangeDataUnavailable as e:
+        print("NO CLEAR IMAGERY:", e.reason)
+        return data_unavailable_response(query, intent, spec, use_case, area, e)
 
     for layer in context.layer_status:
         emit("layer", {"id": layer, "status": "used"})
@@ -492,7 +1122,13 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         ],
     })
 
+    candidates, dropped = _drop_unavailable(candidates, context)
+
     step("candidates", "done", count=len(candidates))
+
+    _infrastructure(use_case, area, context, emit)
+
+    _environment(use_case, context, candidates, emit)
 
     step(
         "scoring", "running",
@@ -541,14 +1177,19 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     top = scored[:TOP_N]
 
-    originals = {
-        (c.get("osm_type"), c.get("osm_id")): c
-        for c in candidates
-    }
+    originals = {candidate_key(c): c for c in candidates}
+
+    # Evidence only (weight 0): rescoring the shortlist adds it
+    # without changing scores or ranks.
+    if _recent_change(use_case, spec, context, top, originals, emit):
+        top = [
+            score_candidate(originals[candidate_key(c)], spec, use_case, context)
+            for c in top
+        ]
 
     for rank, candidate in enumerate(top, start=1):
 
-        original = originals[(candidate.get("osm_type"), candidate.get("osm_id"))]
+        original = originals[candidate_key(candidate)]
 
         candidate["rank"] = rank
 
@@ -571,7 +1212,7 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
 
     print("\nSTEP 7: Creating final decision...")
 
-    decision = _decision(use_case, scored, top)
+    decision = _decision(use_case, scored, top, context)
 
     evidence = _evidence(use_case, context, satellite_status)
 
@@ -589,6 +1230,58 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         ] + list(use_case.unassessed)
 
     limitations = [f"Searched {area.description}."] + list(use_case.limitations)
+
+    if dropped["protected"]:
+        names = sorted({z.name for z in context.protected if z.name and z.kind != "wetland"})
+        limitations.append(
+            f"{len(dropped['protected'])} candidate(s) lying inside mapped protected areas"
+            + (f" ({', '.join(names)})" if names else "")
+            + " were not ranked."
+        )
+
+    if dropped["in_use"]:
+        limitations.append(
+            f"{len(dropped['in_use'])} candidate(s) mostly inside land already in use "
+            "(campuses, schools, parks, places of worship...) were not ranked."
+        )
+
+    if dropped["built"]:
+        limitations.append(
+            f"{len(dropped['built'])} open-land candidate(s) at least "
+            f"{round(BUILT_DROP_SHARE * 100)}% covered by mapped buildings were not ranked."
+        )
+
+    if context.meta.get("land_only"):
+        limitations.append(
+            "The question asked for land, so existing buildings were not considered."
+        )
+
+    found_in_imagery = sum(1 for c in candidates if c.get("discovered"))
+
+    if found_in_imagery:
+        limitations.append(
+            f"{found_in_imagery} candidate(s) are open land found in the 2021 land-cover map "
+            "and not tagged on OpenStreetMap: patches split at roads, not legal plots."
+        )
+
+    change_meta = context.meta.get("change_detection")
+
+    if change_meta:
+
+        before, after = change_meta["before"], change_meta["after"]
+
+        limitations.insert(1, (
+            f"Compared {change_meta['sensor']} images ({change_meta['resolution_m']} m) "
+            f"from {before['date']} and {after['date']} "
+            f"({change_meta['season_gap_days']} days apart in the year)."
+        ))
+
+        if before.get("last_resort") or after.get("last_resort"):
+            limitations.insert(2, (
+                "A Landsat 7 image from after May 2003 was used because no other "
+                "clear image existed; its permanent striped data gaps count as "
+                "missing data, not as change."
+            ))
 
     # Map data failures abort the analysis (502), so imagery is the
     # only layer that can be missing from a successful report.
@@ -634,6 +1327,10 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
             "minimum_area_m2": minimum,
             "maximum_area_m2": maximum,
             "target_area_m2": spec.area.target_m2,
+            "found_in_imagery": sum(1 for c in candidates if c.get("discovered")),
+            "excluded_as_protected": len(dropped["protected"]),
+            "excluded_as_in_use": len(dropped["in_use"]),
+            "excluded_as_built": len(dropped["built"]),
             "evidence_coverage": (
                 top[0]["evidence_coverage"] if top else 0.0
             ),
@@ -650,4 +1347,11 @@ def run_analysis(query, intent, spec, use_case, geolocator, emit=None):
         "limitations": limitations,
 
         "completeness": _completeness(use_case, area, context, satellite_status),
+
+        # Which imagery a change analysis compared; absent otherwise.
+        **({"change_detection": change_meta} if change_meta else {}),
+
+        # Infrastructure around the area; absent when not measured.
+        **({"infrastructure": context.meta["infrastructure"]}
+           if context.meta.get("infrastructure") else {}),
     }
