@@ -6,6 +6,7 @@ Planetary Computer are replaced with fakes that return fixed data.
 """
 
 import math
+import uuid
 import os
 
 from datetime import date, datetime, timedelta, timezone
@@ -28,6 +29,7 @@ import ml_buildings
 import web_research
 import terrain
 import main
+import feedback
 import pipeline
 import ratelimit
 
@@ -452,6 +454,11 @@ def isolated_env(monkeypatch, web_cache_dir):
 
     ratelimit._by_ip.clear()
     ratelimit._total.clear()
+
+    # Feedback goes to a throwaway SQLite file, never a real database.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("FEEDBACK_DB_PATH", os.path.join(web_cache_dir, f"feedback-{uuid.uuid4().hex}.sqlite3"))
+    feedback._by_ip.clear()
 
     def no_network(*args, **kwargs):
         raise AssertionError("test tried to reach a real provider")

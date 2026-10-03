@@ -149,9 +149,16 @@
                 <a class="btn-outline" href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}"
                    target="_blank" rel="noopener">Open in Google Maps</a>
               </div>
+              <div class="card fb-bar">
+                <div><b>Is this ${SL.esc(noun.toLowerCase())} wrong?</b>
+                  <p class="muted sm">A building on it, campus or protected land, wrong size or location: tell us and we'll fix it.</p></div>
+                ${SL.feedback.button("site", "Report a problem")}
+              </div>
             </div>
           </div>
         </section>`;
+
+      SL.feedback.attach(el, {result: r, resultId: id, site: c});
 
       // ---- map
       const map = this.map = SL.maps.create(SL.$("#site-map", el), {zoomControl: true});

@@ -176,12 +176,14 @@
           <div class="row-gap">
             <button class="btn-lime" id="retry">${SL.icon("refresh", 16)} Try again</button>
             <button class="btn-outline" id="edit">Edit question</button>
+            ${SL.feedback.button("result", "Report this problem")}
           </div>
         </div>` : "";
 
       if (run.error) {
         SL.$("#retry", el).onclick = () => SL.startAnalysis(run.query, run.radiusKm);
         SL.$("#edit", el).onclick = () => { SL.pendingQuery = run.query; SL.go("#/"); };
+        SL.feedback.attach(SL.$("#an-error", el), {run});
       }
     },
 

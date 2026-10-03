@@ -118,6 +118,9 @@ window.SL = window.SL || {};
     copy: "M9 9h11v11H9zM5 15H4V4h11v1",
     refresh: "M20 12a8 8 0 11-2.3-5.7M20 4v5h-5",
     info: "M12 21a9 9 0 100-18 9 9 0 000 18zM12 11v5M12 8v.01",
+    message: "M4 5h16v11H9l-5 4z",
+    thumbUp: "M7 11v9H4v-9zM7 11l4-8a2 2 0 012 2v4h5.5a2 2 0 012 2.3l-1.2 7A2 2 0 0117.3 20H7",
+    thumbDown: "M7 13V4H4v9zM7 13l4 8a2 2 0 002-2v-4h5.5a2 2 0 002-2.3l-1.2-7A2 2 0 0017.3 4H7",
   };
 
   SL.icon = (name, size = 18, cls = "") =>

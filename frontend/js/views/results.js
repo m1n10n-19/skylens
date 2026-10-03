@@ -21,7 +21,7 @@
     infrastructure_outlook: "What major infrastructure is coming near Velachery?",
   };
 
-  function tooLarge(el, r) {
+  function tooLarge(el, r, id) {
     el.innerHTML = `
       <section class="page narrow">
         <a class="back" href="#/">${SL.icon("arrowLeft", 16)} Ask another question</a>
@@ -37,12 +37,14 @@
             about ${SL.fmt(r.max_area_km2)} km². A road is searched as a strip along it.</p>
           <div class="row-gap"><button class="btn-lime" id="edit">Edit question</button></div>
         </div>
+        ${SL.feedback.bar()}
       </section>`;
     SL.$("#edit", el).onclick = () => { SL.pendingQuery = r.query; SL.go("#/"); };
+    SL.feedback.attach(el, {result: r, resultId: id});
   }
 
   // A change analysis with no clear imagery for the period.
-  function noImagery(el, r) {
+  function noImagery(el, r, id) {
     el.innerHTML = `
       <section class="page narrow">
         <a class="back" href="#/">${SL.icon("arrowLeft", 16)} Ask another question</a>
@@ -57,13 +59,15 @@
           <ul class="muted sm">${(r.suggestions || []).map(s => `<li>${SL.esc(s)}</li>`).join("")}</ul>
           <div class="row-gap"><button class="btn-lime" id="edit">Edit question</button></div>
         </div>
+        ${SL.feedback.bar()}
       </section>`;
     SL.$("#edit", el).onclick = () => { SL.pendingQuery = r.query; SL.go("#/"); };
+    SL.feedback.attach(el, {result: r, resultId: id});
   }
 
-  function understood(el, r) {
-    if (r.status === "area_too_large") return tooLarge(el, r);
-    if (r.status === "data_unavailable") return noImagery(el, r);
+  function understood(el, r, id) {
+    if (r.status === "area_too_large") return tooLarge(el, r, id);
+    if (r.status === "data_unavailable") return noImagery(el, r, id);
     const spec = r.analysis_spec || {};
     const det = r.detected_requirements || {};
     const implemented = (r.supported_use_cases || []).filter(u => u.implemented);
@@ -92,7 +96,9 @@
             <button class="next-card" data-q="${SL.esc(TRY[u.id])}">
               <b>${SL.esc(u.title)}</b><small>"${SL.esc(TRY[u.id])}"</small></button>`).join("")}
         </div>
+        ${SL.feedback.bar()}
       </section>`;
+    SL.feedback.attach(el, {result: r, resultId: id});
 
     SL.$$("[data-q]", el).forEach(b => b.addEventListener("click", () => {
       SL.pendingQuery = b.dataset.q;
@@ -155,7 +161,7 @@
 
       if (!r) return SL.missingResult(el);
 
-      if (r.status !== "success") return understood(el, r);
+      if (r.status !== "success") return understood(el, r, id);
 
       if ((r.use_case || {}).output_format === "infrastructure_report") return this.renderInfra(el, r, id);
 
@@ -193,6 +199,7 @@
               </div>` : ""}
             </div>
             <div class="head-actions">
+              ${SL.feedback.button("result", "Feedback")}
               <a class="btn-outline" href="#/report/${id}">${SL.icon("file", 16)} Export Report</a>
               <button class="btn-outline" id="share">${SL.icon("share", 16)} Share</button>
               <div class="menu-wrap">
@@ -218,7 +225,10 @@
                 <span class="score-big">Score <b>${SL.fmt(t.score)}</b><small>/ 100</small></span>
               </div>
               ${SL.facts.rowsHTML(SL.facts.rows(t, r, {brief: true}))}
-              <a class="btn-lime" href="#/site/${id}/1">View details ${SL.icon("arrowRight", 16)}</a>
+              <div class="row-gap">
+                <a class="btn-lime" href="#/site/${id}/1">View details ${SL.icon("arrowRight", 16)}</a>
+                ${SL.feedback.button("site")}
+              </div>
             </article>
             <div class="card map-card"><div id="res-map"></div></div>
           </div>
@@ -265,6 +275,8 @@
 
           ${webSection(r)}
 
+          ${SL.feedback.bar()}
+
           <details class="card limits">
             <summary>What this analysis does not tell you</summary>
             <ul>${(r.limitations || []).map(l => `<li>${SL.esc(l)}</li>`).join("")}</ul>
@@ -293,6 +305,7 @@
       SL.$("#dl", el).onclick = () => downloadJSON(r);
 
       attachWeb(el, r, id);
+      SL.feedback.attach(el, {result: r, resultId: id, site: t});
 
       // ---- map: the searched area, then the ranked sites
       const map = this.map = SL.maps.create(SL.$("#res-map", el), {zoomControl: true});
@@ -353,6 +366,8 @@
 
           ${webSection(r)}
 
+          ${SL.feedback.bar()}
+
           <details class="card limits">
             <summary>What this analysis does not tell you</summary>
             <ul>${(r.limitations || []).map(l => `<li>${SL.esc(l)}</li>`).join("")}</ul>
@@ -360,6 +375,7 @@
         </section>`;
 
       attachWeb(el, r, id);
+      SL.feedback.attach(el, {result: r, resultId: id});
 
       const map = this.map = SL.maps.create(SL.$("#res-map", el), {zoomControl: true});
       map.zoomControl.setPosition("bottomright");

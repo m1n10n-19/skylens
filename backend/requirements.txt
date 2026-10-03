@@ -12,3 +12,4 @@ numpy
 rasterio
 pyarrow
 adlfs
+psycopg[binary]
